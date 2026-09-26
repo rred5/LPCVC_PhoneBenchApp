@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run": {
+    "mode": "Warm",
+    "model": "Qwen3-VL-2B-Instruct (GGUF)",
+    "model_already_downloaded": false,
+    "prompt": "Can you identify if this image is real, full synthetic, or tampered? Please mask the tampered object/part if it is tampered.",
+    "repetitions": 10,
+    "backends": ["CPU", "GPU", "NPU"],
+    "rest_seconds": 10
+  },
+  "preprocessing": {
+    "max_edge": 768
+  },
+  "output": {
+    "save_response": true,
+    "save_raw_result": true,
+    "save_instrumentation_log": true,
+    "save_csv": true,
+    "save_summary": true,
+    "metrics": [
+      "prompt_tokens",
+      "generated_tokens",
+      "reported_total_tokens",
+      "ttft_ms",
+      "prefill_tok_s",
+      "decode_tok_s"
+    ]
+  }
+}
