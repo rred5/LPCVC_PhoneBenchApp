@@ -20,7 +20,7 @@ From PowerShell in this repository, with one unlocked Android phone connected:
 
 ```powershell
 .\run_benchmark.ps1 `
-  -ImagePath 'C:\Users\ryang\Downloads\LPCVC\L106.png' `
+  -ImagePath 'C:\path\to\LPCVC\L106.png' `
   -BuildAndInstall `
   -Mode Warm `
   -Repetitions 10 `
@@ -30,7 +30,7 @@ From PowerShell in this repository, with one unlocked Android phone connected:
 For example, an accuracy run can use a different prompt without changing code:
 
 ```powershell
-.\run_benchmark.ps1 -ImagePath 'C:\Users\ryang\Downloads\LPCVC\L106.png' `
+.\run_benchmark.ps1 -ImagePath 'C:\path\to\LPCVC\L106.png' `
   -SettingsFile '.\benchmark_defaults.json' `
   -Mode Warm `
   -Repetitions 1
@@ -83,7 +83,7 @@ Create two folders under a dataset root: `raw/` for real images and `tampered/`
 for manipulated images. Then prepare them and write ground-truth labels:
 
 ```powershell
-python .\prepare_accuracy_dataset.py 'C:\Users\ryang\Downloads\LPCVC\accuracy_dataset'
+python .\prepare_accuracy_dataset.py 'C:\path\to\LPCVC\accuracy_dataset'
 ```
 
 The command writes prepared RGB PNGs and `accuracy_manifest.json`. Each record
@@ -103,7 +103,7 @@ image, and checkpoints each pair/level separately:
 
 ```powershell
 python .\run_accuracy_pilot.py `
-  --dataset 'C:\Users\ryang\Downloads\LPCVC\accuracy_dataset' `
+  --dataset 'C:\path\to\LPCVC\accuracy_dataset' `
   --pairs I016,L080,L104 `
   --repetitions 3
 ```
@@ -141,7 +141,7 @@ figures and a `metrics.json` from a scored pilot:
 
 ```powershell
 py .\make_accuracy_figures.py `
-  --pilot 'C:\Users\ryang\Downloads\LPCVC\pilot_2026-09-20-rescored' `
-  --benchmark 'C:\Users\ryang\Downloads\LPCVC\benchmark_2026-09-18_30runs' `
-  --output 'C:\Users\ryang\Downloads\LPCVC\figures'
+  --pilot 'C:\path\to\LPCVC\pilot_2026-09-20-rescored' `
+  --benchmark 'C:\path\to\LPCVC\benchmark_2026-09-18_30runs' `
+  --output 'C:\path\to\LPCVC\figures'
 ```
