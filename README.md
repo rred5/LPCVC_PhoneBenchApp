@@ -10,7 +10,9 @@ live worker is only available while I have it.
 ## Layout
 
 - `docs/DESIGN.md` — the design: architecture, job format, phone app,
-  security and build plan.
+  security and build plan. `docs/API.md` — the phone ↔ server API.
+- `server/` — the job server (FastAPI). See [server/README.md](server/README.md).
+- `config/` — default job settings, limits and the vision model list.
 - `android/` — Qualcomm's GenieX demo chat app with the current adb-driven
   benchmark and accuracy-pilot harness. See
   [android/BENCHMARK.md](android/BENCHMARK.md).

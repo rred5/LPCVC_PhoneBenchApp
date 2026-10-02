@@ -10,3 +10,7 @@ __pycache__/
 # Secrets
 .env
 .env.*
+
+# Local server data: job images, results, device key
+server/data/
+*.egg-info/

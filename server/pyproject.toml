@@ -1,0 +1,19 @@
+[project]
+name = "phonebench-server"
+version = "0.1.0"
+description = "Job server for the LPCVC PhoneBench worker app"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "pillow>=11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

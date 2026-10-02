@@ -1,0 +1,27 @@
+{
+  "limits": {
+    "max_images": 100,
+    "max_prompts": 5,
+    "max_prompt_chars": 2000,
+    "repetitions": [1, 30],
+    "rest_seconds": [0, 60],
+    "max_edge": [256, 2048],
+    "max_tokens": [1, 4096],
+    "max_upload_bytes": 10485760,
+    "max_upload_edge": 4096,
+    "max_runs_per_job": 500,
+    "max_queued_jobs_per_user": 3,
+    "storage_budget_bytes": 838860800
+  },
+  "queue": {
+    "paused": false,
+    "lease_seconds": 180,
+    "poll_seconds": 10,
+    "run_timeout_seconds": 600,
+    "max_unit_attempts": 3,
+    "max_run_crashes": 2,
+    "default_run_seconds": 75,
+    "keep_images_after_job": false
+  },
+  "min_app_version": "0.1.0"
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run": {
+    "framework": "geniex",
+    "models": ["Qwen3-VL-2B-Instruct-GGUF"],
+    "prompts": [
+      "Can you identify if this image is real, full synthetic, or tampered? Please mask the tampered object/part if it is tampered."
+    ],
+    "images": [],
+    "backends": ["NPU"],
+    "mode": "Warm",
+    "repetitions": 10,
+    "rest_seconds": 10,
+    "max_tokens": 2048
+  },
+  "preprocessing": {
+    "max_edge": 768
+  },
+  "output": {
+    "save_response": true,
+    "save_raw_result": true,
+    "save_csv": true,
+    "save_summary": true,
+    "metrics": [
+      "prompt_tokens",
+      "generated_tokens",
+      "reported_total_tokens",
+      "ttft_ms",
+      "prefill_tok_s",
+      "decode_tok_s"
+    ]
+  }
+}
