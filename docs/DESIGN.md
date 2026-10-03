@@ -129,7 +129,7 @@ limits:
 | Repetitions | 1–30 |
 | Rest between runs | 0–60 s |
 | Image size sent to the model (`max_edge`) | 256–2048 px on the long edge, default 768 |
-| Uploaded image file | up to 10 MB and 4096 px on the long edge |
+| Uploaded image file | up to 32 MB and 8192 px on the long edge (raw LPCVC images are 12–23 MB, up to 5712 px); always downscaled to `max_edge` before the phone sees it |
 | Total runs per job | admin setting, default 500; the site shows an estimated duration before submitting |
 | Queued jobs per person | admin setting, default 3 |
 
@@ -191,8 +191,9 @@ installed for the old harness until validation passes, then can be
 uninstalled.
 
 - **Background service.** A foreground service owns the model. It runs with
-  the screen off and the phone locked, keeps the model loaded between jobs,
-  and restarts after a reboot.
+  the screen off and the phone locked, and restarts after a reboot. It loads
+  the model at the start of each unit and unloads it at the end, matching the
+  harness, so an idle phone holds no model memory.
 - **Status screen.** Opening the app shows the service's live state: idle,
   running, paused or can't reach the server; the current job (who, which
   compute unit, run k of n, elapsed time); recent results; temperature; the
@@ -343,10 +344,13 @@ built.
 **Phase 1 — phone runner and local server**
 
 1. Create the repo and import the app and harness. **Done** (`28482fc`).
-2. Write `docs/API.md`: the phone ↔ server contract.
-3. Build the local FastAPI server, tested from the PC alone.
+2. Write `docs/API.md`: the phone ↔ server contract. **Done** (`b882685`).
+3. Build the local FastAPI server, tested from the PC alone. **Done**
+   (`5a34ff8`; 84 tests, plus an end-to-end run with the fake phone).
 4. Build PhoneBench: service, polling, runs, model download, notification
-   controls.
+   controls. **In progress:** built, installed and set up on the phone; it
+   polls the server and took its first unit. Not yet verified: that unit's
+   runs completing (it was still downloading Qwen3-VL-2B when work stopped).
 5. Add the status screen.
 6. Validate against the 2026-09-18 baseline and a small accuracy pilot
    (I016, L080, L104); test running alongside the chat app.
@@ -381,6 +385,22 @@ These are assumptions, not yet tested:
   resize images to the vision tower's own size, and the SDK reported only 63
   prompt tokens for a 768 px image, so image tokens may not be counted there.
 - Whether the Qwen2.5-VL-7B bundle built for SM8750 runs on our SM8850.
+
+## Notes for later
+
+- **`max_edge` cap.** Left at 2048 for now. The phone's model context is
+  limited (llama.cpp's `n_ctx` is sized from the vision tower), and larger
+  images may cost more image tokens. Measure image tokens per size in part 6;
+  lower the cap if larger images overflow the context.
+- **Downscale at upload time.** Raw LPCVC images are 12–23 MB, so 100 of them
+  would overflow the storage budget and Supabase's free tier before a job is
+  submitted. Plan: choose `max_edge` before uploading and downscale each image
+  as it arrives, deleting the original immediately. Needed before phase 3.
+- **adb.** The phone can appear twice in `adb devices` (by IP and by its mDNS
+  name); `adb disconnect <ip:port>` removes the duplicate.
+- **Log noise.** While the model downloaded, Samsung's
+  `PackageConfigPersister` logged a warning about twice a second for the app.
+  Check whether notification updates cause it; throttle them if so.
 
 ## Open questions
 

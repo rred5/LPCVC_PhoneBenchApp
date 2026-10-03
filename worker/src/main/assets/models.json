@@ -1,0 +1,7 @@
+[
+  {"id": "Qwen3.5-0.8B-GGUF", "modelName": "unsloth/Qwen3.5-0.8B-GGUF", "quant": "Q4_0", "hub": "HUGGINGFACE", "runtime": "llama_cpp", "backends": ["CPU", "GPU", "NPU"]},
+  {"id": "Qwen3.5-2B-GGUF", "modelName": "unsloth/Qwen3.5-2B-GGUF", "quant": "Q4_0", "hub": "HUGGINGFACE", "runtime": "llama_cpp", "backends": ["CPU", "GPU", "NPU"]},
+  {"id": "Qwen3-VL-2B-Instruct-GGUF", "modelName": "unsloth/Qwen3-VL-2B-Instruct-GGUF", "quant": "Q4_0", "hub": "HUGGINGFACE", "runtime": "llama_cpp", "backends": ["CPU", "GPU", "NPU"]},
+  {"id": "Qwen3-VL-4B-Instruct-GGUF", "modelName": "unsloth/Qwen3-VL-4B-Instruct-GGUF", "quant": "Q4_0", "hub": "HUGGINGFACE", "runtime": "llama_cpp", "backends": ["CPU", "GPU", "NPU"]},
+  {"id": "Qwen2.5-VL-7B-Instruct", "modelName": "ai-hub-models/Qwen2.5-VL-7B-Instruct", "hub": "AUTO", "chipset": "SM8750", "runtime": "qairt", "backends": ["NPU"]}
+]

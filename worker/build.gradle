@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application' version '8.13.0'
+    id 'org.jetbrains.kotlin.android' version '2.2.0'
+}
+
+android {
+    namespace 'com.rred5.phonebench'
+    ndkVersion '27.3.13750724'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.rred5.phonebench'
+        minSdk 31
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    packaging {
+        // The GenieX native libraries are loaded from disk.
+        jniLibs.useLegacyPackaging = true
+    }
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    // Qualcomm GenieX SDK (Apache 2.0); brings kotlinx-coroutines.
+    implementation 'com.qualcomm.qti:geniex-android:0.3.5'
+    implementation 'androidx.core:core-ktx:1.13.1'
+}
