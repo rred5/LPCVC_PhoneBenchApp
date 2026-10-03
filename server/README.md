@@ -4,6 +4,10 @@ The job server from [docs/API.md](../docs/API.md). Phase 1 runs it locally:
 it listens on `127.0.0.1`, has no sign-in, and keeps its database, images and
 results in `server/data/` (ignored by git).
 
+**For the full setup with the phone, every job setting, the output files and
+troubleshooting, see [docs/USAGE.md](../docs/USAGE.md).** This page is the
+short version.
+
 ## Set up
 
 From `server/`, once:
@@ -34,6 +38,7 @@ adb reverse tcp:8000 tcp:8000
 .venv\Scripts\python -m phonebench submit C:\path\to\images --settings my-settings.json --name "2B vs 4B"
 .venv\Scripts\python -m phonebench status
 .venv\Scripts\python -m phonebench status j_369aaef70400
+curl.exe -X POST http://127.0.0.1:8000/api/v1/jobs/j_369aaef70400/cancel
 ```
 
 - The folder is uploaded with its structure; images under `real/`,
