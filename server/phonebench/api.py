@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, images, outputs, scheduler
-from .auth import AuthError, SupabaseAuth
+from .auth import PROVIDERS, AuthError, SupabaseAuth
 from .config import Config
 from .settings import SettingsError, resolve
 from .storage import INLINE_BYTES, FileTooLarge, UpstreamError, open_storage
@@ -299,6 +299,16 @@ def create_app(cfg: Config, clock=time.time, store=None, storage=None, auth=None
         return {"ok": True}
 
     # Who is signed in, and what they can choose ---------------------------
+
+    @app.get("/api/v1/auth-config")
+    def auth_config():
+        """What the website needs to sign people in; public values only."""
+        return {
+            "cloud": cfg.cloud,
+            "supabase_url": cfg.supabase_url,
+            "supabase_key": cfg.supabase_publishable_key,
+            "providers": list(PROVIDERS),
+        }
 
     @app.get("/api/v1/me")
     def me(user: User = Depends(current_user)):

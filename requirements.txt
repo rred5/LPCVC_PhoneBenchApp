@@ -1,0 +1,10 @@
+# The API's dependencies on Vercel (api/index.py). Pinned to the versions the
+# server tests pass with; Pillow's version also decides the exact bytes of
+# prepared images, so keep it the same as in server/.venv.
+fastapi==0.142.2
+starlette==1.7.0
+pydantic==2.13.5
+httpx==0.28.1
+pillow==12.3.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3

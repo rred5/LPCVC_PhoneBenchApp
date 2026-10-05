@@ -349,10 +349,11 @@ Now:
 - `supabase/migrations/` — the cloud database tables, access rules and
   storage bucket.
 - `config/` — the default job settings, limits and the model list.
+- `web/` — the React site; `api/index.py`, `vercel.json` and
+  `requirements.txt` deploy it and the API to Vercel.
 
 Planned:
 
-- `web/` — the React site.
 - `analysis/` — scoring and figure scripts for offline use.
 
 ## Build plan
@@ -385,7 +386,13 @@ checked against `members`, and one advisory lock per transaction replaces
 the planned job-claim function.
 
 **Phase 3 — go live.** Deploy to Vercel, add the website with Google
-sign-in, move the phone to dorm Wi-Fi and the cloud server.
+sign-in, move the phone to dorm Wi-Fi and the cloud server. **In progress
+(2026-10-05):** the website (`web/`, React and Vite) and the Vercel setup
+(`vercel.json`, `api/index.py`, pinned `requirements.txt`) are built. The
+website was tested in a browser against the local server with the fake
+phone; the Vercel entry point was run in cloud mode against Supabase,
+including the phone's polls. Waiting on the Vercel project and Google
+sign-in.
 
 **Phase 4 — polish.** Results dashboard, demo mode, README with a diagram,
 demo video. Later: an admin page, zip uploads, Drive and OneDrive folder
@@ -435,7 +442,6 @@ These are assumptions, not yet tested:
 - Does the dorm Wi-Fi require signing in again periodically? That would
   silently cut the phone off.
 - Does the phone throttle when charging in a closed drawer?
-- Which React build setup to use (decide in phase 3).
 - Which framework comes after GenieX, and how it loads models.
 - The TA's expected usage (remote submissions or local only) and whether the
   project can be public.
@@ -470,6 +476,10 @@ These are assumptions, not yet tested:
   files are built from the database on request.
 - 2026-10-05 — Google sign-in only at launch; Microsoft after. Teammates sign
   in with a Google account on the member list.
+- 2026-10-05 — The website is React with Vite and no UI library, served by
+  the same Vercel project as the API, so there is no cross-origin setup. It
+  learns the Supabase project from the server (`/api/v1/auth-config`), so no
+  keys are built into it.
 - 2026-10-05 — Hardening before launch: a lost unit assignment is resent
   rather than counted as a crash; cleanup never fails phone requests; reads
   skip the write lock; per-person upload caps; Google-only sign-in enforced

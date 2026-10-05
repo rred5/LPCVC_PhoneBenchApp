@@ -269,6 +269,7 @@ signed-in member sees every job, since the team shares one phone.
 | `GET /api/v1/jobs/{job_id}/outputs/{file}` | `job.json`, `runs.csv`, `summary.json`, `accuracy.json`, or `outputs.zip` (all of them plus each run's raw report); built fresh on every request |
 | `GET /api/v1/device/status` | Whether the phone is online, paused or busy, and when it was last seen |
 | `GET /api/v1/health` | `{"ok": true, "version"}`; no sign-in |
+| `GET /api/v1/auth-config` | No sign-in: whether the server is in cloud mode, and the Supabase URL and publishable key the website signs in with (public values) |
 
 In cloud mode an output file over 4 MB is answered with a `307` to a signed
 storage URL instead of the file itself.

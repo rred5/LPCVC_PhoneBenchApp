@@ -14,3 +14,7 @@ __pycache__/
 # Local server data: job images, results, device key
 server/data/
 *.egg-info/
+
+# Website
+web/node_modules/
+web/dist/

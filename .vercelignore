@@ -1,0 +1,11 @@
+# Not needed to build the website or run the API on Vercel.
+android/
+worker/
+docs/
+server/data/
+server/.venv/
+server/tests/
+**/__pycache__/
+**/*.egg-info/
+.env
+.env.*

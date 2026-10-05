@@ -6,9 +6,10 @@ the cloud backend is set up. For how the system is designed, see
 
 Status (2026-10-05): local mode works end to end; the first real job ran on
 the phone's NPU on 2026-10-03. The cloud backend (Supabase) is set up and
-tested ([Cloud setup](#cloud-setup-supabase)); the website that uses it is
-next. Check results carefully until the part 6 validation against the
-2026-09-18 baseline is done.
+tested ([Cloud setup](#cloud-setup-supabase)), and the website works against
+a local server; deploying it is in [Deploying to Vercel](#deploying-to-vercel).
+Check results carefully until the part 6 validation against the 2026-09-18
+baseline is done.
 
 ## How it fits together
 
@@ -28,7 +29,8 @@ next. Check results carefully until the part 6 validation against the
    and reports every run as it finishes.
 4. The server writes the results to `server\data\jobs\<job_id>\outputs\`.
 
-The website comes in phase 3; until then, use the commands below.
+The [website](#the-website) does the same from a browser; the commands
+below work without it.
 
 ## Requirements
 
@@ -407,6 +409,86 @@ key, and replaces any earlier cloud key.
 Postgres you can throw away (never the Supabase project): set
 `PHONEBENCH_TEST_DATABASE_URL` before `pytest`; each test makes and drops
 its own schema.
+
+## The website
+
+The website (`web/`, React) submits jobs and shows results from any
+browser. In the cloud, people sign in with Google; the account must be on
+the member list.
+
+- **New job:** a name; a folder (or files) of images, where subfolders named
+  `real`, `synthetic` or `tampered` label them; models; compute units; warm
+  or cold; prompts (up to 5, compared side by side); repetitions, rest,
+  max tokens and image size. Submitting uploads and prepares the images, 20
+  at a time, then queues the job.
+- **Jobs:** every job with status and progress; Cancel on your own jobs (an
+  admin can cancel any). Click a job for its runs (first-token time, decode
+  speed, tokens, verdict for labeled images, the response) and downloads:
+  `runs.csv`, `summary.json`, `accuracy.json`, or everything as a zip.
+- **Phone status** at the top: idle, running, paused, or offline with when it
+  was last seen.
+
+**Run it on your PC** against the local server (no sign-in):
+
+```powershell
+cd C:\Users\ryang\phone-benchmark-hub\server
+.venv\Scripts\python -m phonebench serve          # window 1
+cd C:\Users\ryang\phone-benchmark-hub\web
+npm install                                         # once
+npm run dev                                         # window 2: http://localhost:5173
+```
+
+## Deploying to Vercel
+
+One Vercel project serves the website and the API (`api/index.py`, the
+server as one Python function); `vercel.json` sets the build, the region
+(`iad1`, next to the Supabase project in us-east-1), and security headers.
+Every push to `main` deploys.
+
+**1. Vercel project** (once): at vercel.com, sign in with GitHub, **Add New →
+Project**, import `rred5/LPCVC_PhoneBenchApp`, framework preset **Other**.
+Under **Settings → Environment Variables**, add for Production:
+
+| Name | Value |
+|---|---|
+| `SUPABASE_URL` | as in `.env` |
+| `SUPABASE_SECRET_KEY` | as in `.env` |
+| `PHONEBENCH_DATABASE_URL` | as in `.env` |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase → Project Settings → API Keys → publishable key (public by design) |
+
+Redeploy after changing them.
+
+**2. Google sign-in** (once):
+
+1. In the Google Cloud console, create a project; under **Google Auth
+   Platform**, set up the consent screen (External, app name, support
+   email) and publish it. Email and profile access needs no Google review.
+2. **Clients → Create client → Web application**, with the authorized
+   redirect URI `https://<project>.supabase.co/auth/v1/callback`.
+3. In Supabase, **Authentication → Sign In / Providers**: turn on Google
+   with that client ID and secret; turn Email off.
+4. **Authentication → URL Configuration**: Site URL
+   `https://<site>.vercel.app`; redirect URLs `https://<site>.vercel.app/**`
+   and `http://localhost:5173/**`.
+
+**3. The phone** (app 0.2.0 or newer), over adb once; after that it needs
+only Wi-Fi and a charger:
+
+```powershell
+cd C:\Users\ryang\phone-benchmark-hub
+adb install -r worker\build\outputs\apk\debug\phonebench-debug.apk
+$key = (Get-Content server\data\device_key_cloud.txt).Trim()
+adb shell am broadcast -f 0x20 -n com.rred5.phonebench/.SetupReceiver --es server_url https://<site>.vercel.app --es device_key $key
+Remove-Variable key
+```
+
+The key comes from `phonebench --env ..\.env device-key` ([Cloud
+setup](#cloud-setup-supabase), step 4). To go back to the local server, run
+the local setup broadcast again.
+
+**Check it:** `https://<site>.vercel.app/api/v1/health` answers
+`{"ok": true, ...}`; signing in shows the phone's status; Vercel's **Logs**
+tab shows the API's errors.
 
 ## Returning the phone
 

@@ -6,6 +6,7 @@ Cloud mode is switched on by environment variables:
     PHONEBENCH_DATABASE_URL  Postgres connection string (Supabase pooler)
     SUPABASE_URL             https://<project>.supabase.co
     SUPABASE_SECRET_KEY      the project's secret (service role) key
+    SUPABASE_PUBLISHABLE_KEY the project's publishable key, for the website's sign-in
     PHONEBENCH_BUCKET        storage bucket name (default: phonebench)
 """
 
@@ -31,6 +32,7 @@ class Config:
     database_url: str | None = None
     supabase_url: str | None = None
     supabase_key: str | None = None
+    supabase_publishable_key: str | None = None
     bucket: str = DEFAULT_BUCKET
 
     @property
@@ -103,5 +105,6 @@ def load_config(
         database_url=database_url,
         supabase_url=supabase_url,
         supabase_key=supabase_key,
+        supabase_publishable_key=env.get("SUPABASE_PUBLISHABLE_KEY") or None,
         bucket=env.get("PHONEBENCH_BUCKET") or DEFAULT_BUCKET,
     )

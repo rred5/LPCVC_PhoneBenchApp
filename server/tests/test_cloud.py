@@ -498,3 +498,9 @@ def test_postgres_reads_cannot_write(make_env):
     with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
         with env.app.state.store.read() as db:
             db.execute("DELETE FROM members")
+
+
+def test_auth_config_is_public_and_holds_no_secrets(env):
+    response = env.client.get("/api/v1/auth-config")
+    assert response.status_code == 200
+    assert response.json() == {"cloud": False, "supabase_url": None, "supabase_key": None, "providers": ["google"]}

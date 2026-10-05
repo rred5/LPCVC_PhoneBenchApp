@@ -17,6 +17,8 @@ live worker is only available while I have it.
   server API.
 - `server/` — the job server (FastAPI). See [server/README.md](server/README.md).
 - `worker/` — the PhoneBench Android app. See [worker/README.md](worker/README.md).
+- `web/` — the website (React). `api/index.py`, `vercel.json` and
+  `requirements.txt` deploy it and the API to Vercel.
 - `config/` — default job settings, limits and the vision model list.
 - `supabase/migrations/` — the cloud database tables, access rules and
   storage bucket, applied to the Supabase project.
