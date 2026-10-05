@@ -393,7 +393,126 @@ tr.selected td {
   margin: 0;
 }
 
+.new-job {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.profile-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.profile-pick select {
+  width: auto;
+  min-width: 200px;
+  max-width: 100%;
+  font-weight: 400;
+}
+
+.profile-bar .manage {
+  margin-left: auto;
+}
+
+.profile-notice {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.badge.modified {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+dialog.profiles-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.profiles-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.dialog-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+}
+
+.dialog-body h2,
+.dialog-body p {
+  margin: 0;
+}
+
+.profile-add {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.profile-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.profile-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (max-width: 720px) {
+  .profile-pick {
+    flex: 1 1 100%;
+  }
+
+  .profile-pick select {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+  }
+
   .job-form {
     grid-template-columns: 1fr;
   }

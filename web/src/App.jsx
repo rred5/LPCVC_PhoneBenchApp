@@ -66,7 +66,7 @@ export default function App() {
   }
   return (
     <Shell user={me.email} onSignOut={config.cloud ? signOut : null} phone={<PhoneStatus />}>
-      <NewJob onSubmitted={submitted} />
+      <NewJob key={me.email} user={me} onSubmitted={submitted} />
       <Jobs me={me} version={jobsVersion} />
     </Shell>
   );
