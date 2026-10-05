@@ -57,6 +57,21 @@ export function addProfile(storage, email, rawName, settings, makeId = newId) {
   return error ? fail(error) : { ok: true, state: next, profile };
 }
 
+// Replace a profile's settings with new ones, keeping its name and place in the
+// list, and make it the selected profile. `found` is false if it was removed in
+// another tab.
+export function updateProfile(storage, email, id, settings) {
+  const state = readState(storage, email);
+  const fail = (error, found = true) => ({ ok: false, found, error, state });
+  if (!state.profiles.some((profile) => profile.id === id)) return fail("That profile is no longer saved.", false);
+  const stored = storedSettings(settings);
+  if (!stored) return fail("Those settings can't be saved.");
+  const profile = { ...state.profiles.find((item) => item.id === id), settings: stored };
+  const next = { profiles: state.profiles.map((item) => (item.id === id ? profile : item)), selected: id };
+  const error = write(storage, email, next);
+  return error ? fail(error) : { ok: true, found: true, state: next, profile };
+}
+
 export function removeProfile(storage, email, id) {
   const state = readState(storage, email);
   if (!state.profiles.some((profile) => profile.id === id)) return { ok: true, state };

@@ -445,7 +445,10 @@ prompts, repetitions, rest, max tokens and image size. The job name and the
 images are never saved. Pick one from **Profile**, above the New job card, and
 it fills in the form. **Default** is built in (from `config/defaults.json`) and
 cannot be removed. Once you change the form, a **Modified** tag appears with a
-**Reset** link that puts the profile's settings back.
+**Reset** link that puts the profile's settings back, and **Save changes**,
+which writes the form into that profile (its name stays). Default cannot be
+overwritten, so for it the link reads **Save as profile…** and opens the
+window below with the name field ready.
 
 **Manage profiles** opens a window where you type a name and press **Add
 profile** to save what is in the form now (the new profile is then selected),

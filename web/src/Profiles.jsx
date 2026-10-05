@@ -14,6 +14,7 @@ import {
   selectProfile,
   storageKey,
   summarize,
+  updateProfile,
 } from "./profiles.js";
 
 function browserStorage() {
@@ -49,6 +50,12 @@ export function useProfiles(email) {
     if (result.ok) setChosen(result.profile.id);
     return result;
   };
+  const update = (id, settings) => {
+    const result = updateProfile(browserStorage(), email, id, settings);
+    setProfiles(result.state.profiles);
+    if (result.ok) setChosen(id);
+    return result;
+  };
   const remove = (id) => {
     const result = removeProfile(browserStorage(), email, id);
     setProfiles(result.state.profiles);
@@ -62,7 +69,7 @@ export function useProfiles(email) {
     return result;
   };
 
-  return { profiles, selectedId, add, remove, select };
+  return { profiles, selectedId, add, update, remove, select };
 }
 
 // The profile picker above the New job card. `form` is the job form's state and
@@ -84,6 +91,10 @@ export function ProfileBar({ store, options, form, onApply }) {
     const result = store.add(name, pickSettings(form));
     if (result.ok) setNotice(null);
     return result;
+  };
+  const save = () => {
+    const result = store.update(store.selectedId, pickSettings(form));
+    setNotice(result.ok ? null : result.error);
   };
   const remove = (id) => {
     const result = store.remove(id);
@@ -107,6 +118,15 @@ export function ProfileBar({ store, options, form, onApply }) {
       {modified && (
         <>
           <span className="badge modified">Modified</span>
+          {store.selectedId === DEFAULT_ID ? (
+            <button type="button" className="link" onClick={() => setManaging(true)}>
+              Save as profile…
+            </button>
+          ) : (
+            <button type="button" className="link" onClick={save}>
+              Save changes
+            </button>
+          )}
           <button type="button" className="link" onClick={() => onApply(effective)}>
             Reset
           </button>

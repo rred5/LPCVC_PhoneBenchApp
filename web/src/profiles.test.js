@@ -17,6 +17,7 @@ import {
   selectProfile,
   storageKey,
   summarize,
+  updateProfile,
 } from "./profiles.js";
 
 class MemoryStorage {
@@ -131,6 +132,72 @@ test("removing a profile removes it from storage and falls back to Default", () 
 
   // Removing one that is already gone is not an error.
   assert.equal(removeProfile(storage, EMAIL, "never-existed").ok, true);
+});
+
+test("updating a profile replaces its settings and keeps its name, id and place", () => {
+  const storage = new MemoryStorage();
+  const makeId = ids();
+  const first = addProfile(storage, EMAIL, "First", settings(), makeId).profile;
+  const second = addProfile(storage, EMAIL, "Second", settings(), makeId).profile;
+  addProfile(storage, EMAIL, "Third", settings(), makeId);
+
+  const changed = settings({ repetitions: 7, mode: "cold", prompts: ["new prompt", "  ", "another"], maxEdge: 1024.4 });
+  const result = updateProfile(storage, EMAIL, second.id, changed);
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.name, "Second");
+  assert.equal(result.profile.id, second.id);
+  assert.equal(result.state.selected, second.id);
+
+  // A fresh read, as after a reload, sees the new settings in the same place.
+  const again = readState(storage, EMAIL);
+  assert.deepEqual(again.profiles.map((p) => p.name), ["First", "Second", "Third"]);
+  assert.deepEqual(again.profiles[1].settings, { ...changed, prompts: ["new prompt", "another"], maxEdge: 1024 });
+  assert.equal(again.selected, second.id);
+  // The others are untouched.
+  assert.deepEqual(again.profiles[0].settings, first.settings);
+  assert.equal(again.profiles[2].settings.repetitions, 10);
+});
+
+test("updating a profile that is gone, or with unusable settings, is refused", () => {
+  const storage = new MemoryStorage();
+  const { profile } = addProfile(storage, EMAIL, "Keep", settings(), ids());
+
+  const missing = updateProfile(storage, EMAIL, "gone", settings());
+  assert.equal(missing.ok, false);
+  assert.equal(missing.found, false);
+  assert.match(missing.error, /no longer saved/);
+
+  for (const bad of [null, "text", { ...settings(), mode: "lukewarm" }, { ...settings(), maxTokens: "5" }]) {
+    const result = updateProfile(storage, EMAIL, profile.id, bad);
+    assert.equal(result.ok, false);
+    assert.equal(result.found, true);
+  }
+  assert.deepEqual(readState(storage, EMAIL).profiles[0].settings, profile.settings);
+  // Default is built in and can't be overwritten.
+  assert.equal(updateProfile(storage, EMAIL, DEFAULT_ID, settings()).ok, false);
+});
+
+test("a failed update returns an error and leaves the old settings in place", () => {
+  const storage = new MemoryStorage();
+  const { profile } = addProfile(storage, EMAIL, "Keep", settings(), ids());
+  const failing = Object.assign(new FailingStorage(), { data: storage.data });
+  const result = updateProfile(failing, EMAIL, profile.id, settings({ repetitions: 2 }));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /storage is full/);
+  assert.equal(result.state.profiles[0].settings.repetitions, 10);
+  assert.equal(readState(storage, EMAIL).profiles[0].settings.repetitions, 10);
+});
+
+test("an update re-reads storage so another tab's profiles are kept", () => {
+  const storage = new MemoryStorage();
+  const makeId = ids();
+  const mine = addProfile(storage, EMAIL, "Mine", settings(), makeId).profile;
+  // Another tab adds one and removes none after this page last looked.
+  addProfile(storage, EMAIL, "Added elsewhere", settings(), makeId);
+  const result = updateProfile(storage, EMAIL, mine.id, settings({ repetitions: 4 }));
+  assert.deepEqual(result.state.profiles.map((p) => p.name), ["Mine", "Added elsewhere"]);
+  assert.deepEqual(readState(storage, EMAIL).profiles.map((p) => p.name), ["Mine", "Added elsewhere"]);
+  assert.equal(readState(storage, EMAIL).profiles[0].settings.repetitions, 4);
 });
 
 test("the last selected profile is remembered", () => {
