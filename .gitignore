@@ -18,3 +18,7 @@ server/data/
 # Website
 web/node_modules/
 web/dist/
+
+# Downloaded OAuth credentials (Google client secrets); never commit
+GoogleAuth_*.json
+client_secret*.json
