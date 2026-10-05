@@ -438,6 +438,32 @@ npm install                                         # once
 npm run dev                                         # window 2: http://localhost:5173
 ```
 
+### Profiles
+
+A profile is a saved set of job settings: models, compute units, mode,
+prompts, repetitions, rest, max tokens and image size. The job name and the
+images are never saved. Pick one from **Profile**, above the New job card, and
+it fills in the form. **Default** is built in (from `config/defaults.json`) and
+cannot be removed. Once you change the form, a **Modified** tag appears with a
+**Reset** link that puts the profile's settings back.
+
+**Manage profiles** opens a window where you type a name and press **Add
+profile** to save what is in the form now (the new profile is then selected),
+or press **Remove** next to a profile. Names are up to 40 characters, are not
+"Default", and cannot repeat another name in any capitalisation; you can keep
+30 profiles. Removing the profile you are using switches the form back to
+Default.
+
+Profiles are kept in this browser (its local storage), separately for each
+signed-in email. They survive reloads and restarts, and the profile you used
+last is selected next time. They are not shared between browsers, computers or
+people, and clearing the site's data in the browser deletes them. If the
+server's limits or model list change, a saved profile is trimmed to fit when
+you pick it: a model that is gone is dropped, and numbers are held to the new
+ranges.
+
+The profile code has tests that need no browser: `npm test` in `web/`.
+
 ## Deploying to Vercel
 
 One Vercel project serves the website and the API (`api/index.py`, the

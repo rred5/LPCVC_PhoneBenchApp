@@ -484,3 +484,9 @@ These are assumptions, not yet tested:
   rather than counted as a crash; cleanup never fails phone requests; reads
   skip the write lock; per-person upload caps; Google-only sign-in enforced
   by the server.
+- 2026-10-05 — Job-setting profiles on the website live in the browser's
+  local storage, per signed-in email, with a built-in Default and nothing
+  stored on the server yet. A profile holds only the eight settings (never
+  the job name or images) and is fitted to the server's current limits and
+  models when applied. Keeping them in Supabase, so they follow a person
+  across browsers, is for later.
