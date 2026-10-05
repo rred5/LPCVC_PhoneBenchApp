@@ -43,7 +43,8 @@ export function onSessionChange(callback) {
 export async function signIn() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: window.location.origin },
+    // With the trailing slash, so it matches the "<site>/**" redirect URL in Supabase.
+    options: { redirectTo: `${window.location.origin}/` },
   });
   if (error) throw error;
 }
