@@ -70,11 +70,17 @@ class Env:
     def worker(self, seed: int = 0) -> FakeWorker:
         return FakeWorker(self.client, self.key, seed=seed)
 
-    def upload(self, files: dict[str, bytes], max_edge: int | None = None, headers: dict | None = None) -> dict:
-        """The website's upload flow: reserve slots, send each file, complete it."""
+    def upload(
+        self, files: dict[str, bytes], max_edge: int | None = None, headers: dict | None = None, labels: dict[str, str] | None = None
+    ) -> dict:
+        """The website's upload flow: reserve slots, send each file, complete it. `labels` are the uploader's own tags."""
+        labels = labels or {}
         response = self.client.post(
             "/api/v1/uploads",
-            json={"max_edge": max_edge, "files": [{"name": name, "bytes": len(data)} for name, data in files.items()]},
+            json={
+                "max_edge": max_edge,
+                "files": [{"name": name, "bytes": len(data), **({"label": labels[name]} if name in labels else {})} for name, data in files.items()],
+            },
             headers=headers,
         )
         assert response.status_code == 200, response.text

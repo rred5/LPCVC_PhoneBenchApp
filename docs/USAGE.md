@@ -154,6 +154,10 @@ cd C:\Users\ryang\phone-benchmark-hub\server
 - Images inside a folder named `real`, `synthetic` or `tampered` (any case)
   get that label and are scored for accuracy. Other images get responses and
   speed metrics only.
+- On the website you can also tag folders and images yourself, tampered or
+  untampered (see [The website](#the-website)). A tag wins over a folder
+  name. An untampered image is stored and scored as `real`; there is no tag
+  for `synthetic`, which still comes from a folder of that name.
 
 ```
 my-images\
@@ -421,6 +425,15 @@ the member list.
   or cold; prompts (up to 5, compared side by side); repetitions, rest,
   max tokens and image size. Submitting uploads and prepares the images, 20
   at a time, then queues the job.
+- **Review files** (under Images, once you have chosen some): opens the
+  folders and the images in them. Each folder and image has **tampered** and
+  **untampered** buttons (press the lit one again to clear it) and
+  **Remove**. Tagging a folder tags everything inside it and replaces tags set
+  inside; an image's own tag beats its folder's, and any tag beats a folder
+  name. A solid label is tagged on the image itself; a dashed one comes from
+  its folder's tag or name. Removing only drops files from this job, never
+  from your disk. Choosing another folder replaces the selection and its
+  tags.
 - **Jobs:** every job with status and progress; Cancel on your own jobs (an
   admin can cancel any). Click a job for its runs (first-token time, decode
   speed, tokens, verdict for labeled images, the response) and downloads:

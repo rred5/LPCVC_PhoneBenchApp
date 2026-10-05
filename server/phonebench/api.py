@@ -122,6 +122,8 @@ class FinishRequest(_Body):
 class FileToUpload(BaseModel):
     name: str = Field(max_length=1_000)
     bytes: int
+    # The uploader's own tag; without one the label comes from the folder name.
+    label: Literal["real", "synthetic", "tampered"] | None = None
 
 
 class UploadRequest(BaseModel):
@@ -407,13 +409,14 @@ def create_app(cfg: Config, clock=time.time, store=None, storage=None, auth=None
                     rejected.append({"name": file.name[:255], "reason": str(error)})
                     continue
                 upload_id = new_id("up")
+                label = file.label or images.label_for(name)
                 db.execute(
                     "INSERT INTO uploads (upload_id, name, label, uploaded_by, created_at, max_edge, declared_bytes, status)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting')",
-                    (upload_id, name, images.label_for(name), user.email, now(), max_edge, file.bytes),
+                    (upload_id, name, label, user.email, now(), max_edge, file.bytes),
                 )
                 used += file.bytes
-                slots.append({"upload_id": upload_id, "name": name, "label": images.label_for(name)})
+                slots.append({"upload_id": upload_id, "name": name, "label": label})
         try:
             # One storage call per file; in parallel so a batch takes about as long as one.
             with ThreadPoolExecutor(max_workers=8) as pool:

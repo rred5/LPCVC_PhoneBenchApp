@@ -287,6 +287,10 @@ steps:
    {"max_edge": 768, "files": [{"name": "set/real/I016.png", "bytes": 3480031}]}
    ```
 
+   A file may also carry its own `label` (`real`, `synthetic` or `tampered`);
+   that wins over the label the folder name would give, and any other value is
+   a `422`. The website sends it for images the user tagged by hand.
+
    Each person may have at most 20 unfinished slots (`max_unfinished_uploads`
    in `config/server.json`); a request that would pass that gets `429
    too_many_uploads`, so send files in batches of up to 20. The response has

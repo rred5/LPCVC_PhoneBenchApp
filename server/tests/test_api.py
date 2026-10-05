@@ -50,6 +50,34 @@ def test_full_flow(env):
     assert (env.cfg.jobs_dir / job["job_id"] / "outputs" / "runs.csv").is_file()
 
 
+def test_uploader_tags_beat_folder_names(env):
+    pictures = {name: image_bytes() for name in ("set/real/a.png", "set/real/b.png", "set/plain/c.png", "set/plain/d.png")}
+    upload = env.upload(pictures, labels={"set/real/a.png": "tampered", "set/plain/c.png": "real"})
+    # A tag wins over the folder name; untagged files keep the folder's label, or none.
+    assert {item["name"]: item["label"] for item in upload["accepted"]} == {
+        "set/real/a.png": "tampered",
+        "set/real/b.png": "real",
+        "set/plain/c.png": "real",
+        "set/plain/d.png": None,
+    }
+
+    settings = {"run": {"images": [item["upload_id"] for item in upload["accepted"]]}}
+    job = env.client.post("/api/v1/jobs", json={"name": "tags", "settings": settings}).json()
+    env.worker().run_until_idle()
+    rows = list(csv.DictReader(io.StringIO(env.client.get(f"/api/v1/jobs/{job['job_id']}/outputs/runs.csv").content.decode("utf-8-sig"))))
+    assert {(row["image"], row["label"]) for row in rows} == {
+        ("set/real/a.png", "tampered"),
+        ("set/real/b.png", "real"),
+        ("set/plain/c.png", "real"),
+        ("set/plain/d.png", ""),
+    }
+
+
+def test_unknown_tag_is_refused(env):
+    response = env.client.post("/api/v1/uploads", json={"files": [{"name": "a.png", "bytes": 10, "label": "fake"}]})
+    assert response.status_code == 422
+
+
 def test_device_auth_and_version(env):
     worker = env.worker()
     assert env.client.post("/api/v1/device/poll", json={"state": "idle"}).status_code == 401
