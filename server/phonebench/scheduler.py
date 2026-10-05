@@ -14,6 +14,9 @@ from .config import Config
 from .store import new_id
 
 TERMINAL_JOB = ("done", "failed", "cancelled")
+# How many times one unit may be sent before an idle phone holding it counts
+# as a crash (see `poll`).
+MAX_DELIVERIES = 3
 
 
 class LeaseLost(Exception):
@@ -40,8 +43,11 @@ def insert_job(db, job_id: str, name: str, submitted_by: str, settings: dict, im
     for position, image in enumerate(images):
         db.execute(
             "INSERT INTO job_images (image_id, job_id, position, name, label, path, sha256, bytes, width, height, source_sha256)"
-            " VALUES (:image_id, :job_id, :position, :name, :label, :path, :sha256, :bytes, :width, :height, :source_sha256)",
-            {**image, "job_id": job_id, "position": position},
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                image["image_id"], job_id, position, image["name"], image["label"], image["path"], image["sha256"],
+                image["bytes"], image["width"], image["height"], image["source_sha256"],
+            ),
         )
     prompt_ids = []
     for position, text in enumerate(settings["run"]["prompts"]):
@@ -208,7 +214,7 @@ def _assign(db, cfg: Config, device_id: str, now: float) -> str | None:
     if unit is None:
         return None
     db.execute(
-        "UPDATE units SET status = 'assigned', device_id = ?, lease_expires = ?, assigned_at = ? WHERE unit_id = ?",
+        "UPDATE units SET status = 'assigned', device_id = ?, lease_expires = ?, assigned_at = ?, deliveries = 1 WHERE unit_id = ?",
         (device_id, now + cfg.queue["lease_seconds"], now, unit["unit_id"]),
     )
     db.execute(
@@ -276,7 +282,9 @@ def poll(db, cfg: Config, device_id: str, status: dict, now: float) -> dict:
         "UPDATE devices SET last_seen = ?, status_json = ? WHERE device_id = ?", (now, json.dumps(status), device_id)
     )
     unit_id = status.get("unit_id")
+    wants_work = unit_id is None and status["state"] == "idle" and not cfg.queue["paused"]
     cancel = False
+    assigned = None
     if unit_id is not None:
         unit = _owned_unit(db, cfg, device_id, unit_id, now)
         cancel = get_job(db, unit["job_id"])["status"] == "cancelled"
@@ -285,10 +293,23 @@ def poll(db, cfg: Config, device_id: str, status: dict, now: float) -> dict:
             "SELECT * FROM units WHERE status = 'assigned' AND device_id = ?", (device_id,)
         ).fetchone()
         if held is not None:
-            # The phone holds no unit but the server thinks it does: it restarted mid-unit.
-            _recover_lost(db, cfg, held, now, "worker restarted during this unit")
-    assigned = None
-    if unit_id is None and status["state"] == "idle" and not cfg.queue["paused"]:
+            reported = db.execute(
+                "SELECT COUNT(*) FROM runs WHERE unit_id = ? AND status != 'pending'", (held["unit_id"],)
+            ).fetchone()[0]
+            if wants_work and not reported and held["deliveries"] < MAX_DELIVERIES:
+                # Most likely the reply that assigned it was lost, so the phone
+                # never saw it: send it again rather than count a crash. The
+                # limit still catches a unit that crashes the app before its
+                # first report.
+                db.execute(
+                    "UPDATE units SET deliveries = deliveries + 1, lease_expires = ? WHERE unit_id = ?",
+                    (now + cfg.queue["lease_seconds"], held["unit_id"]),
+                )
+                assigned = held["unit_id"]
+            else:
+                # The phone holds no unit but the server thinks it does: it restarted mid-unit.
+                _recover_lost(db, cfg, held, now, "worker restarted during this unit")
+    if assigned is None and wants_work:
         assigned = _assign(db, cfg, device_id, now)
     return {"poll_after_s": cfg.queue["poll_seconds"], "cancel_unit": cancel, "unit_id": assigned}
 
@@ -385,11 +406,25 @@ def device_status(db, cfg: Config, now: float) -> list[dict]:
     return result
 
 
+def job_summaries(db, jobs: list) -> list[dict]:
+    """Summaries of many jobs, counting their runs in one query."""
+    counts: dict[str, dict[str, int]] = {}
+    job_ids = [job["job_id"] for job in jobs]
+    if job_ids:
+        for row in db.execute(
+            f"SELECT job_id, status, COUNT(*) AS n FROM runs WHERE job_id IN ({','.join('?' * len(job_ids))})"
+            " GROUP BY job_id, status",
+            job_ids,
+        ):
+            counts.setdefault(row["job_id"], {})[row["status"]] = row["n"]
+    return [_summary(job, counts.get(job["job_id"], {})) for job in jobs]
+
+
 def job_summary(db, job) -> dict:
-    counts = {
-        row["status"]: row["n"]
-        for row in db.execute("SELECT status, COUNT(*) AS n FROM runs WHERE job_id = ? GROUP BY status", (job["job_id"],))
-    }
+    return job_summaries(db, [job])[0]
+
+
+def _summary(job, counts: dict[str, int]) -> dict:
     settings = json.loads(job["settings_json"])
     return {
         "job_id": job["job_id"],

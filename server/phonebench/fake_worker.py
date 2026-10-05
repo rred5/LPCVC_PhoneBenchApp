@@ -16,7 +16,7 @@ RESPONSES = {
     "synthetic": "This image looks AI-generated; the textures are too smooth to be a photograph.",
     "tampered": "The image has been tampered with: the object on the left was pasted in.",
 }
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 
 class FakeWorker:

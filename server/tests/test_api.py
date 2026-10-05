@@ -45,9 +45,9 @@ def test_full_flow(env):
     accuracy = env.client.get(f"/api/v1/jobs/{job['job_id']}/outputs/accuracy.json").json()
     assert set(accuracy["groups"][0]["by_label"]) == {"real", "tampered"}
 
-    # Images are deleted once the job is done; originals once the job was created.
-    assert not (env.cfg.jobs_dir / job["job_id"] / "images").exists()
-    assert not any(env.cfg.uploads_dir.iterdir())
+    # Originals are deleted once prepared, prepared images once the job is done.
+    assert not [path for path in env.cfg.files_dir.rglob("*") if path.is_file()]
+    assert (env.cfg.jobs_dir / job["job_id"] / "outputs" / "runs.csv").is_file()
 
 
 def test_device_auth_and_version(env):

@@ -1,26 +1,33 @@
-"""Write a job's output files in the harness's formats.
+"""Build a job's output files in the harness's formats.
 
-Files, under `<data>/jobs/<job_id>/outputs/`:
+Files:
 
 - `job.json`      — the job, its settings, images and prompts
 - `runs.csv`      — one row per run, harness column names
 - `summary.json`  — mean and SD per model, compute unit and prompt
 - `accuracy.json` — scores for labeled images, when the job has any
 - `runs/<run_id>.json` — each run's raw report, when `save_raw_result` is on
+- `outputs.zip`   — all of the above
+
+They are built from the database whenever someone asks, so they are always
+current. Local mode also writes them to `<data>/jobs/<job_id>/outputs/` when
+a job finishes.
 """
 
 import csv
 from datetime import datetime
+import io
 import json
 from pathlib import Path
 import statistics
+import zipfile
 
 from .config import Config
 from .scoring import score
 from .settings import METRICS
 from .store import Store
 
-OUTPUT_FILES = ("job.json", "runs.csv", "summary.json", "accuracy.json")
+OUTPUT_FILES = ("job.json", "runs.csv", "summary.json", "accuracy.json", "outputs.zip")
 STATUS_WORDS = {"completed": "passed", "error": "failed", "cancelled": "cancelled", "pending": "not_run"}
 DEVICE_FIELDS = (
     "load_ms", "warm", "battery_c", "thermal_status", "free_memory_mb",
@@ -60,7 +67,7 @@ def _metric_values(result: dict, metrics: list[str]) -> dict:
 
 def collect(store: Store, job_id: str) -> tuple[dict, list[dict]]:
     """Read a job and build one row per run, in the order the runs happened."""
-    with store.tx() as db:
+    with store.read() as db:
         job = dict(db.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone())
         images = {row["image_id"]: dict(row) for row in db.execute("SELECT * FROM job_images WHERE job_id = ? ORDER BY position", (job_id,))}
         prompts = {row["prompt_id"]: dict(row) for row in db.execute("SELECT * FROM prompts WHERE job_id = ? ORDER BY position", (job_id,))}
@@ -189,24 +196,15 @@ def accuracy(rows: list[dict]) -> dict | None:
     }
 
 
-def _write_json(path: Path, value) -> None:
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+def _json_bytes(value) -> bytes:
+    return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
 
-def write_outputs(store: Store, cfg: Config, job_id: str) -> Path:
-    """(Re)write a job's output files; safe to call while the job is still running."""
+def build_files(store: Store, job_id: str) -> dict[str, bytes]:
+    """Every output file of a job, by name; safe to call while the job is running."""
     job, rows = collect(store, job_id)
     output = job["settings"]["output"]
-    folder = outputs_dir(cfg, job_id)
-    folder.mkdir(parents=True, exist_ok=True)
-    _write_json(folder / "job.json", {key: value for key, value in job.items() if key != "settings_json"})
-    if output["save_raw_result"]:
-        (folder / "runs").mkdir(exist_ok=True)
-        for row in rows:
-            if row["_raw"]:
-                _write_json(folder / "runs" / f"{row['run_id']}.json", row["_raw"])
+    files = {"job.json": _json_bytes({key: value for key, value in job.items() if key != "settings_json"})}
     if output["save_csv"]:
         scored = any("binary_correct" in row for row in rows)
         columns = [
@@ -215,15 +213,38 @@ def write_outputs(store: Store, cfg: Config, job_id: str) -> Path:
             *(["response"] if output["save_response"] else []), "error",
             *(SCORE_FIELDS if scored else ()),
         ]
-        temporary = folder / "runs.csv.tmp"
-        with temporary.open("w", newline="", encoding="utf-8-sig") as file:
-            writer = csv.DictWriter(file, fieldnames=columns, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(rows)
-        temporary.replace(folder / "runs.csv")
+        text = io.StringIO(newline="")
+        writer = csv.DictWriter(text, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        files["runs.csv"] = text.getvalue().encode("utf-8-sig")
     if output["save_summary"]:
-        _write_json(folder / "summary.json", summarize(rows, output["metrics"]))
+        files["summary.json"] = _json_bytes(summarize(rows, output["metrics"]))
     scores = accuracy(rows)
     if scores is not None:
-        _write_json(folder / "accuracy.json", scores)
+        files["accuracy.json"] = _json_bytes(scores)
+    if output["save_raw_result"]:
+        for row in rows:
+            if row["_raw"]:
+                files[f"runs/{row['run_id']}.json"] = _json_bytes(row["_raw"])
+    return files
+
+
+def zip_files(files: dict[str, bytes], folder: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in files.items():
+            archive.writestr(f"{folder}/{name}", data)
+    return buffer.getvalue()
+
+
+def write_outputs(store: Store, cfg: Config, job_id: str) -> Path:
+    """(Re)write a job's output files under the local data folder."""
+    folder = outputs_dir(cfg, job_id)
+    for name, data in build_files(store, job_id).items():
+        path = folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_bytes(data)
+        temporary.replace(path)
     return folder

@@ -18,6 +18,8 @@ live worker is only available while I have it.
 - `server/` — the job server (FastAPI). See [server/README.md](server/README.md).
 - `worker/` — the PhoneBench Android app. See [worker/README.md](worker/README.md).
 - `config/` — default job settings, limits and the vision model list.
+- `supabase/migrations/` — the cloud database tables, access rules and
+  storage bucket, applied to the Supabase project.
 - `android/` — Qualcomm's GenieX demo chat app with the current adb-driven
   benchmark and accuracy-pilot harness. See
   [android/BENCHMARK.md](android/BENCHMARK.md).

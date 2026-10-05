@@ -76,15 +76,17 @@ not render images.
 
 ## Users and access
 
-- **Sign-in:** Google or Microsoft accounts, checked on the server against an
-  approved email list.
+- **Sign-in:** Google accounts at launch, Microsoft later (Purdue accounts
+  may need Purdue IT to approve the app). Checked on the server against the
+  `members` table.
 - **Visibility:** everyone signed in sees all jobs and results. Users cancel
   their own jobs; the admin can cancel any.
-- **Admin (me):** limits, the email list and the device key live in database
-  tables. For now I change them in Supabase's table editor; no admin page is
-  built yet. Users carry an `is_admin` flag, so an admin page (queue pause,
-  limits, allowlist, key revocation, export) can be added later without
-  schema changes.
+- **Admin (me):** the member list is the `members` table, edited with
+  `phonebench members` or Supabase's table editor; limits and queue settings
+  are in `config/server.json` (a redeploy applies them); the device key is
+  made with `phonebench device-key`. No admin page is built yet. Members
+  carry an `is_admin` flag, so an admin page (queue pause, limits, members,
+  key revocation, export) can be added later without schema changes.
 
 ## Job format
 
@@ -158,11 +160,12 @@ each run as it finishes.
 - **Labels from folder names.** Images under subfolders named `real`,
   `synthetic` or `tampered` carry that label, and only labeled images get
   accuracy scores. Unlabeled images get responses and speed metrics.
-- **Shared library.** Labeled images can also be kept on the server and
-  picked for a job.
-- **Upload path.** The browser uploads each file straight to Supabase storage
-  with a progress bar; the server then checks it and makes the prepared PNG
-  at the job's `max_edge`. Originals are deleted once prepared.
+- **Upload path.** The job's `max_edge` is chosen before uploading. The
+  browser uploads each file straight to Supabase storage with a one-time
+  signed URL; the server then checks it, makes the prepared PNG at that
+  `max_edge` and deletes the original at once (API.md, Uploads).
+- **Shared library (later).** Labeled images kept on the server and picked
+  for a job.
 - **Storage lifecycle.** Everything stays small enough for the free tier:
   - Job images live on the server only while the job is queued or running,
     and are deleted when it finishes. Results (text and metrics) are kept.
@@ -283,14 +286,22 @@ it with the new runner.
 
 ## Security
 
-1. **Who can sign in.** Google or Microsoft sign-in, checked on the server
-   against the approved email list.
+1. **Who can sign in.** Google sign-in (Microsoft later); the server asks
+   Supabase whose token it is, requires a confirmed email that signed in
+   through Google, and checks it against the `members` table.
 2. **What gets uploaded.** Size, dimension and type checks (by content, not
    file extension). Every image is decoded and re-saved as a clean PNG before
    the phone sees it, because the phone decodes images in native C++ code.
    Prompt length is capped; model and compute unit come from fixed lists.
 3. **The phone.** Outgoing HTTPS only, no open ports, a revocable device key in
-   app-private storage, and no debug hooks.
+   app-private storage, and no debug hooks. It follows one https redirect for
+   images, sends no key there, and checks every image's SHA-256.
+4. **The data.** The server is the only way in. Row level security is on for
+   every table and Supabase's public API roles have no grants; the bucket is
+   private and reached only through short-lived signed URLs; the secret key
+   and database password exist only in the server's environment. Storage
+   cannot be filled by one person: at most 20 unfinished uploads each, files
+   held to their declared size, and unfinished slots deleted after 3 hours.
 
 Also: per-user limits on queued work; secrets live in Vercel's settings and
 never in git; competition images and data never go in the repo; every API
@@ -300,6 +311,11 @@ request carries a version number so an old app build fails clearly.
 
 - If the phone stops reporting during a run, that work returns to the queue
   after a timeout.
+- A lost reply that assigned a unit is not mistaken for a crash: the phone
+  polls idle, and the server sends the same unit again (up to 3 times while
+  nothing of it has been reported).
+- Cleanup after a phone request (deleting a finished job's images, clearing
+  stale uploads) never turns that request into an error.
 - Work that crashes the app is marked failed after a few attempts, so it
   cannot crash the phone forever.
 - The phone retries with backoff when the network drops; jobs wait in the queue
@@ -314,7 +330,9 @@ runs end-to-end tests without the phone.
 
 ## Testing
 
-- Server: pytest, including the existing 27 harness tests.
+- Server: pytest. The API tests run on SQLite and, with
+  `PHONEBENCH_TEST_DATABASE_URL` set, on a throwaway Postgres too; a test
+  checks that the two schemas match.
 - Contract tests for the phone ↔ server API.
 - End-to-end tests with the fake worker.
 - GitHub Actions runs the server tests and the Android builds.
@@ -324,16 +342,17 @@ runs end-to-end tests without the phone.
 Now:
 
 - `android/` — Qualcomm's demo chat app and the current adb harness.
-- `docs/` — this file.
+- `docs/` — this file, API.md and USAGE.md.
+- `worker/` — the PhoneBench app.
+- `server/` — FastAPI, including the harness's settings, image preparation
+  and scoring.
+- `supabase/migrations/` — the cloud database tables, access rules and
+  storage bucket.
+- `config/` — the default job settings, limits and the model list.
 
 Planned:
 
-- `worker/` — the PhoneBench app (its exact project layout is settled in
-  phase 1, part 4).
-- `server/` — FastAPI, including the harness's Python code.
 - `web/` — the React site.
-- `supabase/` — database migrations and access rules.
-- `config/` — the default job settings and their limits.
 - `analysis/` — scoring and figure scripts for offline use.
 
 ## Build plan
@@ -348,19 +367,25 @@ built.
 3. Build the local FastAPI server, tested from the PC alone. **Done**
    (`5a34ff8`; 84 tests, plus an end-to-end run with the fake phone).
 4. Build PhoneBench: service, polling, runs, model download, notification
-   controls. **In progress:** built, installed and set up on the phone; it
-   polls the server and took its first unit. Not yet verified: that unit's
-   runs completing (it was still downloading Qwen3-VL-2B when work stopped).
+   controls. **In progress.** The first job passed on the phone on
+   2026-10-03: two warm NPU runs on L106 (first token 11.3 s, decode
+   20.7 tok/s, first load 42.5 s). Version 0.2.0 (2026-10-05) follows the
+   cloud image redirect; built, not yet installed. Still to test: Pause,
+   Stop, Quit, cancel from the server, cold mode, CPU and GPU, restart after
+   a reboot, hours with the screen off.
 5. Add the status screen.
 6. Validate against the 2026-09-18 baseline and a small accuracy pilot
    (I016, L080, L104); test running alongside the chat app.
 7. Remove the old UI-automation harness and debug hooks.
 
-**Phase 2 — cloud backend.** Supabase tables, storage, access rules and the
-job-claim function.
+**Phase 2 — cloud backend.** **Done (2026-10-05)**, apart from committing:
+the server runs on Supabase Postgres and storage (`supabase/migrations/`,
+applied and checked live), uploads go straight to storage, sign-in is
+checked against `members`, and one advisory lock per transaction replaces
+the planned job-claim function.
 
-**Phase 3 — go live.** Deploy to Vercel, add sign-in and the allowlist, move
-the phone to dorm Wi-Fi.
+**Phase 3 — go live.** Deploy to Vercel, add the website with Google
+sign-in, move the phone to dorm Wi-Fi and the cloud server.
 
 **Phase 4 — polish.** Results dashboard, demo mode, README with a diagram,
 demo video. Later: an admin page, zip uploads, Drive and OneDrive folder
@@ -370,8 +395,10 @@ links.
 
 These are assumptions, not yet tested:
 
-- Vercel's request size limit (believed to be a few MB) — the reason uploads
-  go straight to Supabase storage.
+- Vercel's request and response size limit (believed to be 4.5 MB) — the
+  reason uploads and phone image downloads go straight to Supabase storage.
+- Vercel's free-tier function usage with the phone polling every 10 s (about
+  260,000 calls a month). Raise `poll_seconds` if it gets close.
 - Supabase's free storage quota (believed to be about 1 GB) and whether the
   phone's polling keeps the free project from pausing.
 - The GenieX SDK running in a background service with no app screen open.
@@ -392,10 +419,11 @@ These are assumptions, not yet tested:
   limited (llama.cpp's `n_ctx` is sized from the vision tower), and larger
   images may cost more image tokens. Measure image tokens per size in part 6;
   lower the cap if larger images overflow the context.
-- **Downscale at upload time.** Raw LPCVC images are 12–23 MB, so 100 of them
-  would overflow the storage budget and Supabase's free tier before a job is
-  submitted. Plan: choose `max_edge` before uploading and downscale each image
-  as it arrives, deleting the original immediately. Needed before phase 3.
+- **Downscale at upload time.** Done 2026-10-05: `max_edge` is chosen before
+  uploading, and each original is deleted as soon as it is prepared.
+- **Large output files.** Output files over 4 MB are copied to
+  `outputs/<job_id>/` in the bucket for download and never deleted; clean
+  them up with the job if they add up.
 - **adb.** The phone can appear twice in `adb devices` (by IP and by its mDNS
   name); `adb disconnect <ip:port>` removes the duplicate.
 - **Log noise.** While the model downloaded, Samsung's
@@ -407,7 +435,7 @@ These are assumptions, not yet tested:
 - Does the dorm Wi-Fi require signing in again periodically? That would
   silently cut the phone off.
 - Does the phone throttle when charging in a closed drawer?
-- Which React build setup to use (decide in phase 4).
+- Which React build setup to use (decide in phase 3).
 - Which framework comes after GenieX, and how it loads models.
 - The TA's expected usage (remote submissions or local only) and whether the
   project can be public.
@@ -432,3 +460,17 @@ These are assumptions, not yet tested:
   and larger image sizes. Images are kept only while their job is active.
 - 2026-10-01 — No admin page for now; limits are edited in Supabase's table
   editor. The GitHub repo stays private for now.
+- 2026-10-05 — Cloud backend on Supabase: Postgres plus a private storage
+  bucket, with the schema in `supabase/migrations/` (applied by the Supabase
+  GitHub integration) and the server as the only way in. Local mode keeps
+  SQLite and a folder, running the same SQL.
+- 2026-10-05 — Uploads go straight to storage in three steps and are
+  prepared on arrival at a `max_edge` chosen first; the phone fetches cloud
+  images through a redirect to a signed URL (app 0.2.0 required). Output
+  files are built from the database on request.
+- 2026-10-05 — Google sign-in only at launch; Microsoft after. Teammates sign
+  in with a Google account on the member list.
+- 2026-10-05 — Hardening before launch: a lost unit assignment is resent
+  rather than counted as a crash; cleanup never fails phone requests; reads
+  skip the write lock; per-person upload caps; Google-only sign-in enforced
+  by the server.

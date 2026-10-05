@@ -1,9 +1,10 @@
 # LPCVC PhoneBench — phone ↔ server API
 
-Status: draft for review, 2026-10-01 (phase 1, part 2). This is the contract
-between the PhoneBench app and the server. The same API is served by the local
-server (phase 1) and the cloud server (phase 3), so the phone code does not
-change between them. See [DESIGN.md](DESIGN.md) for the why.
+Status: in use. Written 2026-10-01 (phase 1, part 2); user endpoints and
+cloud mode added 2026-10-05 (phase 2). This is the contract between the
+PhoneBench app, the website and the server. The local server (phase 1) and the
+cloud server serve the same API, so the phone code does not change between
+them. See [DESIGN.md](DESIGN.md) for the why.
 
 ## Concepts
 
@@ -26,8 +27,10 @@ repetition.
 - JSON bodies, UTF-8. Times are ISO 8601 in UTC (`2026-10-01T18:04:05Z`).
 - IDs are opaque strings chosen by the server (`j_…`, `u_…`, `r_…`, `img_…`,
   `p_…`). The phone never builds IDs or URLs itself.
-- The phone sends `PhoneBench-App-Version: 0.1.0` on every request. If the
-  app is too old, the server answers `426` with the minimum version.
+- The phone sends `PhoneBench-App-Version: 0.2.0` on every request. If the
+  app is older than `min_app_version` in `config/server.json` (now 0.2.0, the
+  first version that follows the image redirect below), the server answers
+  `426`.
 - Errors look like `{"error": {"code": "lease_lost", "message": "…"}}`.
 
 ## Authentication
@@ -36,8 +39,12 @@ repetition.
   `Authorization: Bearer <device key>`. The server stores only a hash of the
   key; the admin can revoke it. The phone keeps the key in app-private
   storage.
-- **User endpoints** need a signed-in session in the cloud. The local server
-  listens only on `127.0.0.1` and has no sign-in.
+- **User endpoints** need `Authorization: Bearer <access token>` in cloud
+  mode: the token of a Supabase Auth session (Google sign-in). The server asks
+  Supabase whose token it is, requires a confirmed email, and admits only
+  emails in the `members` table (`401 unauthorized` without a valid token,
+  `403 not_a_member` for anyone else). The local server listens only on
+  `127.0.0.1` and has no sign-in; every request acts as the admin "local".
 
 ## Phone endpoints
 
@@ -53,7 +60,7 @@ Request:
 {
   "state": "idle",
   "unit_id": null,
-  "app_version": "0.1.0",
+  "app_version": "0.2.0",
   "framework": "geniex",
   "framework_version": "0.3.5",
   "models_downloaded": ["Qwen3-VL-2B-Instruct-GGUF"],
@@ -120,8 +127,17 @@ A unit:
 
 ### Image — `GET /api/v1/device/images/{image_id}`
 
-Returns the prepared PNG. Only images in a unit currently leased to this phone
-can be fetched. The phone checks the SHA-256 before using it.
+Only images in a unit currently leased to this phone can be fetched
+(`404` otherwise).
+
+- **Local mode** returns the prepared PNG.
+- **Cloud mode** answers `307` with a `Location` on file storage: a signed
+  https URL valid for 5 minutes. The host limits response bodies to a few MB,
+  so images cannot pass through the server. The phone follows **one**
+  redirect, only to `https`, and sends no device key or other headers there.
+
+Either way the phone checks the SHA-256 from the unit before using the image,
+so the storage URL needs no further trust.
 
 ### Run report — `POST /api/v1/device/runs/{run_id}`
 
@@ -188,6 +204,10 @@ stays `paused`).
 - If the lease runs out, the phone is presumed dead: the remaining runs go
   back in the queue as a new unit. Later calls about the old unit get `409
   lease_lost`, and the phone abandons it and deletes its images.
+- **Lost replies.** If the server assigned a unit but the phone polls `idle`
+  without it, the reply was most likely lost. While nothing of that unit has
+  been reported, the server sends the same unit again, up to 3 deliveries in
+  all; after that it treats the phone as having crashed (below).
 - **Crash loops.** The run after the last reported one is the one that was in
   progress. If the phone dies during the same run twice, that run is
   recorded as an error ("worker stopped during this run twice") and skipped.
@@ -213,9 +233,9 @@ stays `paused`).
   for it;
 - `repetitions`, `rest_seconds`, `max_tokens`, image and prompt counts are
   within the limits in DESIGN.md;
-- every image URL is on the same server as the API (the phone never fetches
-  from anywhere else), its SHA-256 matches, and it decodes as a PNG of at most
-  4096 px.
+- every image URL is a path on the API server (the phone never asks anywhere
+  else; the only other host it contacts is the one https redirect above), its
+  SHA-256 matches, and it decodes as a PNG of at most 4096 px.
 
 **Errors and retries**
 
@@ -227,32 +247,111 @@ stays `paused`).
 | `426` | Stop polling; status screen shows "update the app". |
 | `400` / `422` | A bug: log it, finish the unit `failed`. |
 
-## User endpoints (summary)
+## User endpoints
 
-Used by the website and, in phase 1, by a small command-line tool on the PC.
-Full details come with phase 2.
+Used by the website and by the command-line tool (`python -m phonebench`).
+All need sign-in in cloud mode (see [Authentication](#authentication)). Every
+signed-in member sees every job, since the team shares one phone.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/v1/uploads` | Upload images; returns image IDs. In the cloud the browser uploads to Supabase storage and this call registers them. |
-| `POST /api/v1/jobs` | Submit a job: a name plus settings (see DESIGN.md, Job format) |
-| `GET /api/v1/jobs` | List jobs with progress |
-| `GET /api/v1/jobs/{job_id}` | One job: status, progress, per-run results |
-| `POST /api/v1/jobs/{job_id}/cancel` | Cancel a job |
-| `GET /api/v1/jobs/{job_id}/outputs/{file}` | `runs.csv`, `summary.json`, accuracy reports |
+| `GET /api/v1/me` | `{"email", "is_admin", "cloud"}`: who is signed in |
+| `GET /api/v1/options` | What the job form needs: default settings, limits, the model list, accepted file types |
+| `POST /api/v1/uploads` | Reserve upload slots (see [Uploads](#uploads)) |
+| `PUT /api/v1/uploads/{upload_id}/data` | Local mode only: the file itself |
+| `POST /api/v1/uploads/{upload_id}/complete` | Check and prepare an uploaded file |
+| `DELETE /api/v1/uploads/{upload_id}` | Drop an upload that is not in a job (e.g. one the browser gave up on) |
+| `POST /api/v1/jobs` | Submit a job: `{"name", "settings"}` (see DESIGN.md, Job format); returns the job with `estimated_seconds` |
+| `GET /api/v1/jobs` | The 200 newest jobs with progress |
+| `GET /api/v1/jobs/{job_id}` | One job: status, progress, settings, units |
+| `GET /api/v1/jobs/{job_id}/runs` | Every run so far, with metrics and scores |
+| `POST /api/v1/jobs/{job_id}/cancel` | Cancel a job; only its submitter or an admin may (`403 not_yours` otherwise) |
+| `GET /api/v1/jobs/{job_id}/outputs/{file}` | `job.json`, `runs.csv`, `summary.json`, `accuracy.json`, or `outputs.zip` (all of them plus each run's raw report); built fresh on every request |
 | `GET /api/v1/device/status` | Whether the phone is online, paused or busy, and when it was last seen |
+| `GET /api/v1/health` | `{"ok": true, "version"}`; no sign-in |
+
+In cloud mode an output file over 4 MB is answered with a `307` to a signed
+storage URL instead of the file itself.
+
+### Uploads
+
+Files go to storage directly, not through the server, because the cloud host
+limits request bodies to about 4.5 MB and images may be up to 32 MB. Three
+steps:
+
+1. **Reserve slots.** `POST /api/v1/uploads` with the folder-relative names,
+   sizes, and the `max_edge` the job will use:
+
+   ```json
+   {"max_edge": 768, "files": [{"name": "set/real/I016.png", "bytes": 3480031}]}
+   ```
+
+   Each person may have at most 20 unfinished slots (`max_unfinished_uploads`
+   in `config/server.json`); a request that would pass that gets `429
+   too_many_uploads`, so send files in batches of up to 20. The response has
+   one slot per accepted file, and the other files with reasons (wrong type,
+   too large, storage full, bad name):
+
+   ```json
+   {
+     "max_edge": 768,
+     "uploads": [{"upload_id": "up_3c1f", "name": "set/real/I016.png", "label": "real",
+                  "upload_url": "https://<project>.supabase.co/storage/v1/object/upload/sign/...", "content_type": "image/png"}],
+     "rejected": []
+   }
+   ```
+
+2. **Send each file** with `PUT <upload_url>`, the raw bytes as the body and
+   `Content-Type: <content_type>`. In cloud mode the URL is a one-time signed
+   storage URL (send no sign-in header); in local mode it is
+   `/api/v1/uploads/{upload_id}/data` on the server.
+3. **Complete each file** with `POST /api/v1/uploads/{upload_id}/complete`.
+   The server checks it (PNG, JPEG or WebP by content, one frame, at most
+   32 MB and 8192 px), prepares it at `max_edge` exactly like
+   `prepare_benchmark_image.py`, stores the prepared PNG and deletes the
+   original. A file larger than the size declared in step 1 is rejected, since
+   the storage budget counted the declared size. It answers with the upload's
+   prepared and source sizes; `409 not_uploaded` if the file has not arrived;
+   or `422 bad_image` with the reason, after which the slot is gone.
+   Completing twice is harmless.
+
+Then submit the job with the `upload_id`s in `settings.run.images` and the
+same `max_edge` in `settings.preprocessing.max_edge` (`422` if they differ;
+upload again). Each upload can be used by one job. Slots not completed within
+3 hours (signed upload URLs last 2) and uploads not used within a day are
+deleted; the phone's polls trigger that cleanup every 5 minutes.
 
 ## Local mode (phase 1)
 
-- The server runs on the PC at `http://127.0.0.1:8000`.
+- The server runs on the PC at `http://127.0.0.1:8000`, with SQLite and
+  files in `server/data/`.
 - `adb reverse tcp:8000 tcp:8000` makes the phone's `127.0.0.1:8000` reach
   the PC, over USB or wireless adb.
 - The app allows plain HTTP only to `127.0.0.1`, and only in debug builds;
   everything else must be HTTPS.
-- The server creates a device key on first start and prints it; it is set on
-  the phone over adb.
-- Job outputs are written to a folder on the PC in the same layout as the
-  current harness.
+- The server creates a device key on first start and saves it in
+  `server/data/device_key.txt`; it is set on the phone over adb.
+- Job outputs are also written to `server/data/jobs/<job_id>/outputs/` when a
+  job finishes.
+
+## Cloud mode (phase 2)
+
+- Switched on by `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and
+  `PHONEBENCH_DATABASE_URL` (see USAGE.md). The database is Supabase
+  Postgres. Its tables come from `supabase/migrations/` and have row level
+  security on and no grants for Supabase's public API roles, so only the
+  server can reach them.
+- Files live in the private `phonebench` bucket and are reached only through
+  signed URLs: `incoming/<upload_id>` (an original, until completed),
+  `images/<upload_id>.png` (prepared, until its job finishes) and
+  `outputs/<job_id>/<file>` (large output downloads).
+- Every database write takes one advisory lock, so several server instances
+  never hand out the same unit twice. Reads that change nothing (sign-in and
+  key checks, job lists, results) use read-only transactions without the
+  lock, so the website never holds up the phone.
+- Work after a phone request's own transaction (deleting a finished job's
+  images, clearing stale uploads) never fails that request; whatever fails is
+  retried on the next one.
 
 ## Example
 

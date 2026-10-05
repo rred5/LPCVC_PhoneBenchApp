@@ -3,7 +3,7 @@ import pytest
 from phonebench.config import load_config
 from phonebench.settings import SettingsError, resolve, total_runs
 
-CFG = load_config()
+CFG = load_config(env={})
 
 
 def run(**fields) -> dict:

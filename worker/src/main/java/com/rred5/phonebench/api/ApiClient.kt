@@ -35,11 +35,27 @@ class ApiClient(
             JSONObject().put("status", status).put("error", error ?: JSONObject.NULL),
         )
 
-    /** Download an image the server named in a unit. Only same-server paths are fetched. */
+    /**
+     * Download an image the server named in a unit. Only same-server paths are asked for; a cloud
+     * server answers with one redirect to an https file-storage URL, fetched without the device key.
+     * The caller checks the SHA-256 from the unit either way.
+     */
     fun downloadImage(path: String, destination: File, maxBytes: Long) {
         require(path.startsWith("/api/v1/device/images/") && !path.contains("..")) { "Image URL is not on this server: $path" }
-        val connection = open(path.removePrefix("/"), "GET")
+        var connection = open(path.removePrefix("/"), "GET")
         try {
+            if (connection.responseCode in REDIRECTS) {
+                val location = connection.getHeaderField("Location") ?: throw IOException("Image redirect has no location")
+                val target = URL(connection.url, location)
+                require(target.protocol == "https") { "Image redirect is not https: ${target.protocol}" }
+                connection.disconnect()
+                connection = (target.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    instanceFollowRedirects = false
+                }
+                if (connection.responseCode in REDIRECTS) throw IOException("Image storage redirected again")
+            }
             check(connection)
             connection.inputStream.use { input ->
                 destination.outputStream().use { output ->
@@ -57,6 +73,10 @@ class ApiClient(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private companion object {
+        val REDIRECTS = setOf(301, 302, 303, 307, 308)
     }
 
     private fun segment(id: String) = URLEncoder.encode(id, "UTF-8")

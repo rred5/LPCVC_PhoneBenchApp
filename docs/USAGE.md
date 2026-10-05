@@ -1,13 +1,14 @@
 # Using PhoneBench
 
-How to run model benchmarks on the phone from your PC today (phase 1: local
-only). For how the system is designed, see [DESIGN.md](DESIGN.md); for the
-exact phone ↔ server protocol, see [API.md](API.md).
+How to run model benchmarks on the phone from your PC (local mode), and how
+the cloud backend is set up. For how the system is designed, see
+[DESIGN.md](DESIGN.md); for the exact protocol, see [API.md](API.md).
 
-Status: the server is complete and tested. The phone app installs, connects
-and takes work, but its runs have not yet been verified end to end on the
-phone (phase 1, part 4). Check results carefully until part 6 validation is
-done.
+Status (2026-10-05): local mode works end to end; the first real job ran on
+the phone's NPU on 2026-10-03. The cloud backend (Supabase) is set up and
+tested ([Cloud setup](#cloud-setup-supabase)); the website that uses it is
+next. Check results carefully until the part 6 validation against the
+2026-09-18 baseline is done.
 
 ## How it fits together
 
@@ -21,13 +22,13 @@ done.
 ```
 
 1. You submit a folder of images and settings with `phonebench submit`.
-2. The server downscales the images, splits the job into units (one model on
-   one compute unit each) and queues them.
+2. The server downscales each image as it arrives, splits the job into
+   units (one model on one compute unit each) and queues them.
 3. The PhoneBench app asks the server for work every 10 s, runs each unit,
    and reports every run as it finishes.
 4. The server writes the results to `server\data\jobs\<job_id>\outputs\`.
 
-There is no website yet; that comes in phases 3–4.
+The website comes in phase 3; until then, use the commands below.
 
 ## Requirements
 
@@ -50,8 +51,9 @@ py -m venv .venv
 .venv\Scripts\python -m pytest
 ```
 
-The tests should all pass. The first time the server starts (next section),
-it creates the phone's device key in `server\data\device_key.txt`.
+The tests should all pass. Run the `pip install` line again after pulling
+changes that add dependencies. The first time the server starts (next
+section), it creates the phone's device key in `server\data\device_key.txt`.
 
 ### 2. Build and install the app
 
@@ -63,6 +65,8 @@ adb install -r build\outputs\apk\debug\phonebench-debug.apk
 ```
 
 The first build downloads a few libraries; later builds can add `--offline`.
+The server requires app version 0.2.0 or newer (`versionName` in
+`worker\build.gradle`); an older app shows "Update the app".
 
 ### 3. Set up the phone
 
@@ -235,11 +239,12 @@ The phone stops within about 10 s; finished runs are kept.
 
 ## Results
 
-Each job's results are in `server\data\jobs\<job_id>\outputs\`, and can also
-be opened in a browser while the server runs:
+Each finished job's results are in `server\data\jobs\<job_id>\outputs\`, and
+can also be opened in a browser while the server runs:
 `http://127.0.0.1:8000/api/v1/jobs/<job_id>/outputs/runs.csv` (or
-`summary.json`, `accuracy.json`, `job.json`). Results so far are available
-while a job is still running.
+`summary.json`, `accuracy.json`, `job.json`, or `outputs.zip` for all of
+them). Those links are built fresh from the database, so they also show
+results so far while a job is running.
 
 | File | Contents |
 |---|---|
@@ -280,10 +285,11 @@ and have not been adapted to these outputs yet.
 
 ### Storage
 
-Originals are deleted once the job is created; the downscaled images once the
-job finishes. Uploads not used in a job are deleted after 24 hours. Results
-are kept until you delete `server\data\jobs\<job_id>`. Total image storage is
-capped at 800 MB.
+Each original is deleted as soon as it is downscaled; the downscaled images
+(in `server\data\files\`) once their job finishes. Uploads not used in a
+job are deleted after 24 hours. Results stay in the database, and the files
+in `server\data\jobs\<job_id>` until you delete them. Total image storage
+is capped at 800 MB.
 
 ## On the phone
 
@@ -332,6 +338,76 @@ it (the old one stops working), then re-run the setup broadcast.
 runs queued jobs with a simulated phone that returns made-up results. Don't
 mix it with real jobs you care about.
 
+## Cloud setup (Supabase)
+
+Cloud mode is the same server with its database and files in a Supabase
+project instead of `server\data\`. It is what the website will use. This
+setup was done on 2026-10-05; repeat it only for a new Supabase project.
+
+**1. The `.env` file.** At the repo root, `C:\Users\ryang\phone-benchmark-hub\.env`.
+Git ignores it; never commit or share it.
+
+```
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_...
+PHONEBENCH_DATABASE_URL=postgresql://postgres.<project>:<password>@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+```
+
+- `SUPABASE_URL`: Supabase dashboard → Project Settings → Data API.
+- `SUPABASE_SECRET_KEY`: Project Settings → API Keys → secret key. It can
+  do anything in the project; if it leaks, delete it there and make a new
+  one.
+- `PHONEBENCH_DATABASE_URL`: the **Connect** button → Connection String →
+  **Transaction pooler** (port 6543), with your database password in place
+  of `[YOUR-PASSWORD]`, without the brackets. The password is shown only
+  when the project is made; reset it under Project Settings → Database if
+  lost. Use letters and digits, since `@ # / : %` break the URL.
+
+**2. Tables and storage.** From `server\`:
+
+```powershell
+.venv\Scripts\python -m phonebench --env ..\.env init-db
+```
+
+This applies `supabase\migrations\`: the tables (row level security on, no
+access through Supabase's public API) and the private `phonebench` bucket
+(32 MB per file, images and result files only). It is safe to repeat. The
+Supabase GitHub integration also applies new migration files when they reach
+`main`, so a schema change is a new file in that folder.
+
+**3. Members.** Only these emails can sign in to the website:
+
+```powershell
+.venv\Scripts\python -m phonebench --env ..\.env members list
+.venv\Scripts\python -m phonebench --env ..\.env members add teammate@gmail.com
+.venv\Scripts\python -m phonebench --env ..\.env members add someone@gmail.com --admin
+.venv\Scripts\python -m phonebench --env ..\.env members remove teammate@gmail.com
+```
+
+Admins can cancel anyone's job; others only their own. The `members` table
+can also be edited in the Supabase table editor (`is_admin` is 0 or 1).
+Sign-in starts with Google accounts, so add the address people use with
+Google, exactly as Google shows it (dots included).
+
+In Supabase, under **Authentication → Sign In / Providers**, keep **Google**
+on and turn **Email** off. The server already refuses anything but Google
+sign-ins; this stops strangers creating accounts at all.
+
+**4. The phone's cloud key** (when the phone moves to the cloud server,
+phase 3):
+
+```powershell
+.venv\Scripts\python -m phonebench --env ..\.env device-key
+```
+
+It is saved in `server\data\device_key_cloud.txt`, separate from the local
+key, and replaces any earlier cloud key.
+
+**Testing against Postgres.** The server tests can also run against a
+Postgres you can throw away (never the Supabase project): set
+`PHONEBENCH_TEST_DATABASE_URL` before `pytest`; each test makes and drops
+its own schema.
+
 ## Returning the phone
 
 1. In PhoneBench, tap **Quit worker**.
@@ -341,5 +417,6 @@ mix it with real jobs you care about.
    and `adb uninstall com.geniex.demo.test`.
 4. On the phone: remove the PC under Wireless debugging → Paired devices, and
    turn off Developer options.
-5. On the PC: `.venv\Scripts\python -m phonebench device-key` so the old key
-   is useless.
+5. On the PC: `.venv\Scripts\python -m phonebench device-key`, and
+   `.venv\Scripts\python -m phonebench --env ..\.env device-key` if the phone
+   used the cloud, so the old keys are useless.

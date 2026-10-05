@@ -5,7 +5,8 @@ that takes units from the server, runs them on the CPU, GPU or NPU with the
 Qualcomm GenieX SDK, and reports every run. Setup and day-to-day use are in
 [docs/USAGE.md](../docs/USAGE.md).
 
-- App ID `com.rred5.phonebench`, version 0.1.0; Android 12 (API 31) or newer.
+- App ID `com.rred5.phonebench`, version 0.2.0; Android 12 (API 31) or newer.
+  The server requires 0.2.0 or newer.
 - Dependencies: GenieX SDK 0.3.5 (Apache 2.0) and `androidx.core`. Network
   and JSON use Android's built-in classes.
 
@@ -35,8 +36,11 @@ adb install -r build\outputs\apk\debug\phonebench-debug.apk
 ## Behavior worth knowing
 
 - Every unit is checked before it runs: the model and compute unit, all
-  limits, and every image (only fetched from the server's own image path,
+  limits, and every image (only requested from the server's own image path,
   SHA-256 matched, a PNG of at most 4096 px).
+- A cloud server answers image requests with a redirect to file storage. The
+  app follows exactly one redirect, only to an https URL, and sends no device
+  key there (0.2.0 and newer).
 - Warm units load the model once, run one unreported warm-up, and reset the
   context before each run; cold units load and unload for every run. The
   model is unloaded after every unit.
