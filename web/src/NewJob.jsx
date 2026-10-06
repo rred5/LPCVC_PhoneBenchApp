@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
+import FileTree from "./FileTree.jsx";
+import { buildTree, chosenLabel, describeCounts, isWithin, pruneTags, withTag } from "./fileTree.js";
 import { ProfileBar, useProfiles } from "./Profiles.jsx";
 import { BACKENDS, cleanSettings, resolveProfile } from "./profiles.js";
-import { filePath, isImage, labelOf, uploadImages } from "./upload.js";
+import { filePath, isImage, uploadImages } from "./upload.js";
 
 const JOB_NAME = /^[\w .()-]{1,80}$/;
 const MB = 1024 * 1024;
@@ -12,6 +14,8 @@ export default function NewJob({ user, onSubmitted }) {
   const [options, setOptions] = useState(null);
   const [form, setForm] = useState(null);
   const [files, setFiles] = useState([]);
+  const [tags, setTags] = useState({});
+  const [paneOpen, setPaneOpen] = useState(false);
   const [skipped, setSkipped] = useState(0);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
@@ -36,6 +40,8 @@ export default function NewJob({ user, onSubmitted }) {
     return BACKENDS.filter((backend) => chosen.every((model) => model.backends.includes(backend)));
   }, [options, form]);
 
+  const tree = useMemo(() => buildTree(files.map(filePath), tags), [files, tags]);
+
   if (!form) {
     return <section className="card">{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</section>;
   }
@@ -58,16 +64,19 @@ export default function NewJob({ user, onSubmitted }) {
     const all = Array.from(event.target.files ?? []);
     const images = all.filter(isImage).sort((a, b) => filePath(a).localeCompare(filePath(b)));
     setFiles(images);
+    setTags({});
     setSkipped(all.length - images.length);
     setMessage(null);
     setError(null);
     event.target.value = "";
   };
-  const labels = files.reduce((counts, file) => {
-    const label = labelOf(filePath(file)) ?? "unlabeled";
-    counts[label] = (counts[label] ?? 0) + 1;
-    return counts;
-  }, {});
+  // `key` is an image's path, or a folder's path with a trailing "/".
+  const remove = (key) => {
+    const kept = files.filter((file) => !isWithin(key, filePath(file)));
+    setFiles(kept);
+    setTags(pruneTags(kept.map(filePath), tags));
+  };
+  const tag = (key, value) => setTags(withTag(tags, key, value));
   const tooBig = files.filter((file) => file.size > limits.max_upload_bytes);
   const prompts = form.prompts.map((prompt) => prompt.trim()).filter(Boolean);
   const runs = form.models.length * form.backends.length * files.length * prompts.length * form.repetitions;
@@ -91,7 +100,13 @@ export default function NewJob({ user, onSubmitted }) {
     try {
       setProgress({ done: 0, total: files.length });
       const batch = Math.min(limits.max_unfinished_uploads, 20);
-      const { accepted, rejected } = await uploadImages(files, form.maxEdge, batch, (done, total) => setProgress({ done, total }));
+      const { accepted, rejected } = await uploadImages(
+        files,
+        form.maxEdge,
+        batch,
+        (done, total) => setProgress({ done, total }),
+        (file) => chosenLabel(filePath(file), tags),
+      );
       if (!accepted.length) throw new Error(`No images were accepted. ${describe(rejected)}`);
       const job = await api("/api/v1/jobs", {
         method: "POST",
@@ -117,6 +132,7 @@ export default function NewJob({ user, onSubmitted }) {
           (rejected.length ? ` Skipped ${rejected.length}: ${describe(rejected)}` : ""),
       );
       setFiles([]);
+      setTags({});
       setSkipped(0);
       onSubmitted();
     } catch (failure) {
@@ -149,13 +165,19 @@ export default function NewJob({ user, onSubmitted }) {
                 Choose files
                 <input type="file" accept=".png,.jpg,.jpeg,.webp" multiple onChange={pick} hidden />
               </label>
+              {files.length > 0 && (
+                <button type="button" aria-expanded={paneOpen} onClick={() => setPaneOpen(!paneOpen)}>
+                  {paneOpen ? "Hide files" : "Review files"}
+                </button>
+              )}
               <span className="muted">
                 {files.length
-                  ? `${files.length} image(s): ${Object.entries(labels).map(([label, count]) => `${count} ${label}`).join(", ")}`
-                  : "Subfolders named real, synthetic or tampered label their images for accuracy scoring."}
+                  ? `${files.length} image(s): ${describeCounts(tree.labels)}`
+                  : "Subfolders named real, synthetic or tampered label their images for accuracy scoring. Once chosen, you can tag or remove folders and images."}
                 {skipped > 0 && ` · ${skipped} other file(s) skipped`}
               </span>
             </div>
+            {paneOpen && files.length > 0 && <FileTree tree={tree} onTag={tag} onRemove={remove} />}
           </fieldset>
 
           <fieldset>

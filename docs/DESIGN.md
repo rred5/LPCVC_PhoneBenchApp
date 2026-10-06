@@ -160,6 +160,13 @@ each run as it finishes.
 - **Labels from folder names.** Images under subfolders named `real`,
   `synthetic` or `tampered` carry that label, and only labeled images get
   accuracy scores. Unlabeled images get responses and speed metrics.
+- **Labels by hand.** The website lists the chosen folders and images
+  (Review files, under Images) so people can remove any of them and tag a
+  folder or an image tampered or untampered. The tag travels as an optional
+  `label` on each file in the upload request and beats the folder name. The
+  server's labels stay `real`, `synthetic` and `tampered`: untampered is
+  stored as `real`, so strict three-class scoring expects `real` for it and
+  the real-vs-manipulated score is exactly tampered vs untampered.
 - **Upload path.** The job's `max_edge` is chosen before uploading. The
   browser uploads each file straight to Supabase storage with a one-time
   signed URL; the server then checks it, makes the prepared PNG at that

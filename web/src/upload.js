@@ -3,7 +3,6 @@ import { api } from "./api.js";
 import { getToken } from "./auth.js";
 
 const IMAGE_TYPES = [".png", ".jpg", ".jpeg", ".webp"];
-const LABELS = ["real", "synthetic", "tampered"];
 const PARALLEL_FILES = 4;
 
 // The path within the chosen folder, as the server stores it.
@@ -14,13 +13,6 @@ export function filePath(file) {
 export function isImage(file) {
   const path = filePath(file);
   return IMAGE_TYPES.some((type) => path.toLowerCase().endsWith(type)) && !path.split("/").some((part) => part.startsWith("."));
-}
-
-export function labelOf(path) {
-  const parts = path.split("/");
-  if (parts.length < 2) return null;
-  const folder = parts[parts.length - 2].toLowerCase();
-  return LABELS.includes(folder) ? folder : null;
 }
 
 async function sendFile(slot, file) {
@@ -46,7 +38,9 @@ async function inParallel(items, limit, work) {
 }
 
 // Upload `files` prepared for `maxEdge`; returns {accepted, rejected}, accepted in name order.
-export async function uploadImages(files, maxEdge, batchSize, onProgress) {
+// `chosenLabel(file)` gives the label a person picked for a file, if any; the
+// server takes the rest from folder names.
+export async function uploadImages(files, maxEdge, batchSize, onProgress, chosenLabel = () => undefined) {
   const accepted = [];
   const rejected = [];
   let done = 0;
@@ -56,7 +50,7 @@ export async function uploadImages(files, maxEdge, batchSize, onProgress) {
     const byName = new Map(batch.map((file) => [filePath(file), file]));
     const body = await api("/api/v1/uploads", {
       method: "POST",
-      body: { max_edge: maxEdge, files: batch.map((file) => ({ name: filePath(file), bytes: file.size })) },
+      body: { max_edge: maxEdge, files: batch.map((file) => ({ name: filePath(file), bytes: file.size, label: chosenLabel(file) })) },
     });
     body.rejected.forEach((item) => {
       rejected.push(item);
