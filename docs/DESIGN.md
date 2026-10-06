@@ -375,31 +375,39 @@ built.
 3. Build the local FastAPI server, tested from the PC alone. **Done**
    (`5a34ff8`; 84 tests, plus an end-to-end run with the fake phone).
 4. Build PhoneBench: service, polling, runs, model download, notification
-   controls. **In progress.** The first job passed on the phone on
-   2026-10-03: two warm NPU runs on L106 (first token 11.3 s, decode
-   20.7 tok/s, first load 42.5 s). Version 0.2.0 (2026-10-05) follows the
-   cloud image redirect; built, not yet installed. Still to test: Pause,
+   controls. **Working; not fully tested.** The first job passed on the
+   phone on 2026-10-03: two warm NPU runs on L106 (first token 11.3 s,
+   decode 20.7 tok/s, first load 42.5 s). Version 0.2.0 (the cloud image
+   redirect) has been installed on the phone since 2026-10-05, and has run
+   a 100-run job through the cloud (see phase 3). Still to test: Pause,
    Stop, Quit, cancel from the server, cold mode, CPU and GPU, restart after
    a reboot, hours with the screen off.
 5. Add the status screen.
 6. Validate against the 2026-09-18 baseline and a small accuracy pilot
-   (I016, L080, L104); test running alongside the chat app.
+   (I016, L080, L104); test running alongside the chat app. Warm NPU decode
+   speed differs between readings and needs explaining: 25.5 tok/s in the
+   baseline, 20.7 in the first PhoneBench test, 32.7 on the first run of
+   the first cloud job.
 7. Remove the old UI-automation harness and debug hooks.
 
-**Phase 2 — cloud backend.** **Done (2026-10-05)**, apart from committing:
-the server runs on Supabase Postgres and storage (`supabase/migrations/`,
-applied and checked live), uploads go straight to storage, sign-in is
-checked against `members`, and one advisory lock per transaction replaces
-the planned job-claim function.
+**Phase 2 — cloud backend.** **Done (2026-10-05).** The server runs on
+Supabase Postgres and storage (`supabase/migrations/`, applied by hand with
+`phonebench init-db` and checked live), uploads go straight to storage,
+sign-in is checked against `members`, and one advisory lock per write
+transaction replaces the planned job-claim function.
 
 **Phase 3 — go live.** Deploy to Vercel, add the website with Google
-sign-in, move the phone to dorm Wi-Fi and the cloud server. **In progress
-(2026-10-05):** the website (`web/`, React and Vite) and the Vercel setup
-(`vercel.json`, `api/index.py`, pinned `requirements.txt`) are built. The
-website was tested in a browser against the local server with the fake
-phone; the Vercel entry point was run in cloud mode against Supabase,
-including the phone's polls. Waiting on the Vercel project and Google
-sign-in.
+sign-in, move the phone to dorm Wi-Fi and the cloud server. **Live since
+2026-10-05** at https://lpcvc-phone-bench-app-server.vercel.app (one Vercel
+project for the site and the API, region iad1, redeployed on every push to
+`main`). Google sign-in works for members of the `members` table.
+Teammates' jobs run on the phone: the phone, on app 0.2.0, polls the cloud
+server on its own, and the first cloud job (10 images × 10 repetitions,
+Qwen3-VL-2B, warm NPU) completed all 100 runs. The site has since gained a
+file pane for removing and tagging images, and saved job-setting profiles.
+Still to do: put the phone on dorm Wi-Fi with a charger (it is on a PC
+hotspot for now), turn off Supabase's Email sign-in provider, and add
+Microsoft sign-in if Purdue accounts are needed.
 
 **Phase 4 — polish.** Results dashboard, demo mode, README with a diagram,
 demo video. Later: an admin page, zip uploads, Drive and OneDrive folder
@@ -419,6 +427,10 @@ These are assumptions, not yet tested:
 - Android 16 and Samsung: starting the service at boot, polling for hours with
   the screen off, and Samsung's background app killing.
 - `adb reverse` over wireless adb.
+- Whether the Supabase GitHub integration applies new files in
+  `supabase/migrations/` when they reach `main`. It did not on 2026-10-05
+  (no check appeared on the push); until that is fixed, apply a new
+  migration with `phonebench --env ..\.env init-db`.
 - Memory over hundreds of load and unload cycles in cold mode.
 - Whether battery temperature and thermal state are enough to flag
   throttling.
@@ -474,15 +486,20 @@ These are assumptions, not yet tested:
 - 2026-10-01 — No admin page for now; limits are edited in Supabase's table
   editor. The GitHub repo stays private for now.
 - 2026-10-05 — Cloud backend on Supabase: Postgres plus a private storage
-  bucket, with the schema in `supabase/migrations/` (applied by the Supabase
-  GitHub integration) and the server as the only way in. Local mode keeps
-  SQLite and a folder, running the same SQL.
+  bucket, with the schema in `supabase/migrations/` (applied with
+  `phonebench init-db`; the Supabase GitHub integration did not run it on
+  push) and the server as the only way in. Local mode keeps SQLite and a
+  folder, running the same SQL.
 - 2026-10-05 — Uploads go straight to storage in three steps and are
   prepared on arrival at a `max_edge` chosen first; the phone fetches cloud
   images through a redirect to a signed URL (app 0.2.0 required). Output
   files are built from the database on request.
 - 2026-10-05 — Google sign-in only at launch; Microsoft after. Teammates sign
   in with a Google account on the member list.
+- 2026-10-05 — The Google OAuth app stays in Testing mode, so there is no
+  privacy policy or Google verification to maintain. The cost: each person
+  must be on Google's Test users list as well as the `members` table
+  (publishing the app, with a privacy page, would remove that step).
 - 2026-10-05 — The website is React with Vite and no UI library, served by
   the same Vercel project as the API, so there is no cross-origin setup. It
   learns the Supabase project from the server (`/api/v1/auth-config`), so no
