@@ -145,3 +145,76 @@ py .\make_accuracy_figures.py `
   --benchmark 'C:\path\to\LPCVC\benchmark_2026-09-18_30runs' `
   --output 'C:\path\to\LPCVC\figures'
 ```
+
+## Two-stage tamper comparison
+
+This compares runtimes (for example `llama_cpp` on the NPU against `qairt`) on the two-stage
+prompt in [two_stage_prompts.json](two_stage_prompts.json) (see
+[docs/two_stage_prompt.md](../docs/two_stage_prompt.md)). Each image is one conversation: stage 1
+sends the image and asks for a verdict, tampered objects and an explanation; stage 2 follows up in
+the same conversation, with no reset and no second image, and asks for a box per object in
+absolute pixels. Stage 2 always runs. The model loads once for the whole series, so the run shows
+how inference time drifts as the phone warms.
+
+The analysis scripts need numpy, scipy and matplotlib in addition to Pillow:
+`py -m pip install -r requirements-analysis.txt`.
+
+1. **Pair the images and derive ground truth.** Point `tamper_dataset.py` at the shared folder's
+   `LPCVC 2027` directory. It pairs every tampered image with the real image of the same name,
+   turns each mask into a normalized box, prepares 768 px copies under neutral names, and writes
+   `manifest.json`. Masks that cover almost nothing are flagged low confidence and left out of box
+   scoring.
+
+   ```powershell
+   py .\tamper_dataset.py 'C:\path\to\LPCVC 2027' --output 'C:\path\to\LPCVC\datasets\tamper_comparison'
+   ```
+
+2. **Install the debug app and its test APK** (`run_benchmark.ps1 -BuildAndInstall` builds and
+   installs both), with one unlocked phone connected.
+
+3. **Run a series.** `--model` is the app catalog's display name; its entry says which runtime
+   runs it. `--count` is a whole number of real/tampered pairs, balanced over source and edit
+   type and interleaved so heat does not line up with one label. Add `--dry-run` to write
+   `series.json` and see the plan without touching the phone. Rerun the same command to resume.
+
+   ```powershell
+   py .\run_two_stage_series.py --manifest 'C:\path\to\...\manifest.json' `
+     --model 'Qwen3-VL-2B-Instruct (GGUF)' --count 50 --output 'C:\path\to\runs\llama_cpp-npu'
+   ```
+
+   Keep the phone in the same place, at the same charge, and let it cool between runs of different
+   models. The runner records battery temperature and Android's thermal status on every poll.
+
+4. **Score and plot.** Up to three runs are compared side by side. `--convention calibrate`
+   (the default) picks the coordinate scale (pixels, 0-1000, or 0-1) that best explains each
+   model's boxes, because some models answer on the 0-1000 scale whatever the prompt says.
+
+   ```powershell
+   py .\analyze_two_stage.py --manifest 'C:\path\to\...\manifest.json' `
+     --run llama_cpp=C:\path\to\runs\llama_cpp-npu --run qairt=C:\path\to\runs\qairt `
+     --output 'C:\path\to\results\two_stage_comparison'
+   ```
+
+   Output: `report.md`, `metrics.json`, one `scored_<label>.csv` per run (the numbers behind every
+   figure), and these figures: `timing_summary_<label>.png` (time per image by stage, accumulated
+   time, histogram and a stats table), `thermal_<label>.png` (stage 1 time, decode time per token
+   and temperature against run order, with where the time levels off), `runtime_comparison.png`,
+   `time_comparison.png`, `verdict_accuracy.png`, `bbox_accuracy.png` and `tokens_per_output.png`.
+
+How the numbers are defined:
+
+- **Inference time** of a stage is time to first token plus decode time, as the SDK reports them.
+  "Board" total is the sum over stages and images; "host" total is the whole run on the PC,
+  including model load, the warm-up, rests and polling.
+- **Where it levels off** is the first image after which the rolling median (7 images) stays
+  within 10% of the final level (median of the last quarter). It is judged on stage 1 time and on
+  decode time per token, because those do comparable work for every image. Stage 2 is short when
+  the model calls an image real, so the both-stage total swings with the real/tampered mix.
+- **Box accuracy** is the IoU of the best predicted box against the mask-derived box, in
+  coordinates normalized by each image's size. A tampered image with no box scores 0.
+- **Verdict accuracy** is reported three ways: 3-class (real / tampered / fully_fake),
+  real vs manipulated, and sensitivity / specificity.
+
+Limits: the second turn depends on the SDK's incremental tokenization and on the context being big
+enough for image, both prompts and both answers; a stage that errors is recorded as missing rather
+than guessed. Selecting NPU records the requested compute unit, not proof that every stage used it.
