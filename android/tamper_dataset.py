@@ -193,6 +193,26 @@ def load_manifest(path: Path) -> dict:
     return manifest
 
 
+def _round_order(strata: dict[tuple, list[str]], rng: random.Random) -> list[tuple]:
+    """Order the strata for one round, alternating sources.
+
+    A round that is cut short (the count is not a multiple of the strata) then takes about
+    the same number from each source, instead of always the alphabetically first ones.
+    """
+    by_source: dict[str, list[tuple]] = {}
+    for key in sorted(strata):
+        by_source.setdefault(key[0], []).append(key)
+    for keys in by_source.values():
+        rng.shuffle(keys)
+    queues = [by_source[source] for source in sorted(by_source)]
+    order = []
+    while any(queues):
+        for queue in queues:
+            if queue:
+                order.append(queue.pop())
+    return order
+
+
 def select_records(manifest: dict, count: int, seed: int = 0) -> list[dict]:
     """Pick `count` images as whole real/tampered pairs, balanced over source and edit.
 
@@ -216,7 +236,7 @@ def select_records(manifest: dict, count: int, seed: int = 0) -> list[dict]:
         rng.shuffle(members)
     chosen: list[str] = []
     while len(chosen) < wanted:
-        for key in sorted(strata):
+        for key in _round_order(strata, rng):
             if strata[key] and len(chosen) < wanted:
                 chosen.append(strata[key].pop())
     rng.shuffle(chosen)

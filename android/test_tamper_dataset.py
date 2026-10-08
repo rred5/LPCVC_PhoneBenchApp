@@ -164,6 +164,13 @@ class SelectionTests(unittest.TestCase):
         chosen = [r for r in select_records(self.manifest(), 6, seed=1) if r["variant"] == "tampered"]
         self.assertEqual(len({(r["source_kind"], r["edit"]) for r in chosen}), 3)
 
+    def test_a_partial_round_takes_equally_from_each_source(self):
+        manifest = self.manifest()  # six (source, edit) strata, two pairs each
+        for seed in range(10):
+            tampered = [r for r in select_records(manifest, 8, seed) if r["variant"] == "tampered"]
+            counts = {kind: sum(1 for r in tampered if r["source_kind"] == kind) for kind in ("nano_banana", "qwen_inpaint")}
+            self.assertEqual(counts, {"nano_banana": 2, "qwen_inpaint": 2}, f"seed {seed}")
+
     def test_odd_or_oversized_counts_are_rejected(self):
         with self.assertRaises(ValueError):
             select_records(self.manifest(), 7)

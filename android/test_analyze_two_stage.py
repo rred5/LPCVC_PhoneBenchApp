@@ -154,8 +154,10 @@ class EndToEndTests(unittest.TestCase):
         m = json.loads((out / "metrics.json").read_text(encoding="utf-8"))["runs"][0]
         self.assertEqual((m["images"], m["tampered"], m["real"]), (60, 30, 30))
         self.assertEqual(m["verdict"]["specificity"], 1.0)
-        self.assertAlmostEqual(m["verdict"]["sensitivity"], 0.75, delta=0.1)  # every 4th image missed, in run order
-        self.assertGreater(m["boxes"]["mean_best_iou"], 0.6)
+        self.assertAlmostEqual(m["verdict"]["sensitivity"], 0.75, delta=0.1)  # every 4th position missed, in run order
+        # A missed image scores 0, so mean IoU = hit rate x mean IoU of hits. Dividing out the hit rate
+        # checks box quality on its own, whichever images the order happens to make misses.
+        self.assertGreater(m["boxes"]["mean_best_iou"] / m["boxes"]["hit_at_50"], 0.75)
         self.assertEqual(m["boxes"]["false_positive_on_real"], 0.0)
         self.assertEqual(m["boxes"]["excluded_low_confidence"], 1)  # pair I003's mask is flagged
         self.assertGreater(m["tokens"]["stage2_generated_tampered"], m["tokens"]["stage2_generated_real"])
@@ -183,7 +185,7 @@ class EndToEndTests(unittest.TestCase):
         runs = {m["label"]: m for m in json.loads((out / "metrics.json").read_text(encoding="utf-8"))["runs"]}
         self.assertEqual(runs["pixels"]["box_convention"], "absolute")
         self.assertEqual(runs["thousand"]["box_convention"], "norm1000")
-        self.assertGreater(runs["thousand"]["boxes"]["mean_best_iou"], 0.6)
+        self.assertGreater(runs["thousand"]["boxes"]["mean_best_iou"] / runs["thousand"]["boxes"]["hit_at_50"], 0.75)
         forced = self.root / "forced"
         self.run_cli("--manifest", str(self.manifest_path), "--run", f"thousand={self.root / 'b'}", "--output", str(forced),
                      "--no-figures", "--convention", "absolute")
