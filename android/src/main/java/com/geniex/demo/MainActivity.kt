@@ -132,6 +132,8 @@ class MainActivity : FragmentActivity() {
                     model = intent.getStringExtra("model") ?: "unspecified",
                     image = intent.getStringExtra("image") ?: "unspecified",
                     prompt = intent.getStringExtra("prompt") ?: "unspecified",
+                    // Optional cap for this run only; unset keeps the default limit.
+                    maxTokens = intent.getIntExtra("maxTokens", 0).takeIf { it > 0 },
                 )
                 File(filesDir, "benchmark/results/$runId.json").delete()
                 Log.d(TAG, "BENCHMARK_RUN_STARTED: $runId")
@@ -194,6 +196,7 @@ class MainActivity : FragmentActivity() {
         val model: String,
         val image: String,
         val prompt: String,
+        val maxTokens: Int? = null,
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -779,7 +782,9 @@ class MainActivity : FragmentActivity() {
                             .onSuccess { result ->
                                 Log.d(TAG, "vlm chat template:${result.formattedText}")
                                 val baseConfig =
-                                    GenerationConfigSample().toGenerationConfig()
+                                    GenerationConfigSample()
+                                        .apply { benchmarkRun?.maxTokens?.let { maxTokens = it } }
+                                        .toGenerationConfig()
                                 // Only inject the current turn's media: SDK tokenizes
                                 // incrementally, so re-passing history bitmaps breaks
                                 // mtmd_tokenize (markers/bitmaps mismatch).
@@ -1050,6 +1055,9 @@ class MainActivity : FragmentActivity() {
                     generatedTokens = streamResult.profile.generatedTokens,
                     decodeTokS = streamResult.profile.decodingSpeed,
                     error = null,
+                    promptTimeMs = streamResult.profile.promptTimeMs,
+                    decodeTimeMs = streamResult.profile.decodeTimeMs,
+                    stopReason = streamResult.profile.stopReason,
                 )
                 if (isLoadVlmModel) {
                     vlmChatList.add(
@@ -1119,12 +1127,16 @@ class MainActivity : FragmentActivity() {
         generatedTokens: Any?,
         decodeTokS: Any?,
         error: String?,
+        promptTimeMs: Any? = null,
+        decodeTimeMs: Any? = null,
+        stopReason: String? = null,
     ) {
         val run = benchmarkRun ?: return
         benchmarkRun = null
         try {
             val json = JSONObject()
-                .put("schema_version", 1)
+                // 2 adds prompt_time_ms, decode_time_ms, stop_reason and max_tokens.
+                .put("schema_version", 2)
                 .put("run_id", run.runId)
                 .put("mode", run.mode)
                 .put("backend", run.backend)
@@ -1139,6 +1151,10 @@ class MainActivity : FragmentActivity() {
                 .put("prefill_tok_s", prefillTokS ?: JSONObject.NULL)
                 .put("generated_tokens", generatedTokens ?: JSONObject.NULL)
                 .put("decode_tok_s", decodeTokS ?: JSONObject.NULL)
+                .put("prompt_time_ms", promptTimeMs ?: JSONObject.NULL)
+                .put("decode_time_ms", decodeTimeMs ?: JSONObject.NULL)
+                .put("stop_reason", stopReason ?: JSONObject.NULL)
+                .put("max_tokens", run.maxTokens ?: JSONObject.NULL)
             val directory = File(filesDir, "benchmark/results").apply { mkdirs() }
             val finalFile = File(directory, "${run.runId}.json")
             val temporary = File(directory, "${run.runId}.json.tmp")

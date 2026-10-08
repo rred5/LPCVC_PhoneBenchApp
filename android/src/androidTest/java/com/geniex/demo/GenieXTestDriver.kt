@@ -45,13 +45,15 @@ internal class GenieXTestDriver(private val device: UiDevice) {
 
         // The compute-unit picker appears for multi-unit (GGUF) models. Select
         // the radio for this unit and confirm. GPU reveals an n-layers field
-        // that defaults to 999, so no extra input is needed.
+        // that defaults to 999, so no extra input is needed. NPU-only (QAIRT)
+        // models offer a single unit, so the app skips the picker and loads at once.
         val radio = device.wait(Until.findObject(By.res(PACKAGE, radioId)), UI_TIMEOUT_MS)
-        assertNotNull("Compute-unit radio '${radioId}' not found in load dialog", radio)
-        radio.click()
-        val okButton = device.wait(Until.findObject(By.text("OK")), UI_TIMEOUT_MS)
-        assertNotNull("Load dialog OK button not found", okButton)
-        okButton.click()
+        if (radio != null) {
+            radio.click()
+            val okButton = device.wait(Until.findObject(By.text("OK")), UI_TIMEOUT_MS)
+            assertNotNull("Load dialog OK button not found", okButton)
+            okButton.click()
+        }
 
         // Load success reveals the Unload button (gone until a model loads).
         assertTrue(
