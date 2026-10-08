@@ -1,10 +1,12 @@
 """Offline checks for the two-stage series runner, using a scripted stand-in for adb."""
 
 import contextlib
+import fnmatch
 import hashlib
 import io
 import json
 from pathlib import Path
+import shlex
 import sys
 import tempfile
 import unittest
@@ -12,7 +14,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 import run_two_stage_series as runner
-from run_two_stage_series import Collector, PACKAGE, build_series, load_finished, push_file, thermal_sample
+from run_two_stage_series import Collector, PACKAGE, build_series, clear_results, load_finished, push_file, thermal_sample
 from two_stage import load_prompts
 
 RESULTS = "files/benchmark/results"
@@ -35,6 +37,7 @@ class FakePhone:
         self.battery = "temperature: 305"
         self.thermal = "Thermal Status: 1"
         self.calls: list[tuple] = []
+        self.rm_works = True
 
     def __call__(self, *args, timeout=30):
         self.calls.append(args)
@@ -49,6 +52,20 @@ class FakePhone:
             if command[0] == "sha256sum":
                 data = self.files.get(command[1])
                 return ok(f"{hashlib.sha256(data).hexdigest()}  {command[1]}") if data is not None else fail("no such file")
+            if command[0] == "sh":
+                # Like real adb: the arguments are joined with spaces and parsed again on the phone,
+                # so `sh -c` only gets the first word unless the whole script is quoted.
+                words = shlex.split(" ".join(command))
+                if words[:2] != ["sh", "-c"] or len(words) < 3:
+                    return fail("sh: bad arguments")
+                script = shlex.split(words[2])
+                if script and script[0] == "rm" and self.rm_works:
+                    for pattern in script[2:]:
+                        folder, _, name_pattern = pattern.rpartition("/")
+                        if folder == RESULTS:
+                            for name in [n for n in self.results if fnmatch.fnmatch(n, name_pattern)]:
+                                del self.results[name]
+                return ok()
             if command[0] == "mkdir":
                 return ok()
             if command[0] == "cp":
@@ -159,6 +176,41 @@ class CollectorTests(unittest.TestCase):
         again.adopt(load_finished(self.output))
         self.assertEqual(again.poll(), 0)
         self.assertEqual(len(self.rows()), 1)
+
+
+class EarlierRunTests(unittest.TestCase):
+    """A second run on the same phone must never read the first run's result files."""
+
+    def phone_with_old_results(self):
+        phone = FakePhone()
+        phone.results.update({"s0001-1.json": json.dumps(completed(model="A")), "s0001-2.json": json.dumps(completed(model="A")),
+                              "warmup-1.json": json.dumps(completed()), "notes.txt": "keep"})
+        return phone
+
+    def test_clear_removes_earlier_results_and_nothing_else(self):
+        phone = self.phone_with_old_results()
+        clear_results(phone)
+        self.assertEqual(sorted(phone.results), ["notes.txt"])
+
+    def test_clear_refuses_to_go_on_when_the_files_are_still_there(self):
+        phone = self.phone_with_old_results()
+        phone.rm_works = False
+        with self.assertRaisesRegex(RuntimeError, "Could not clear"):
+            clear_results(phone)
+
+    def test_a_result_from_another_model_stops_the_run(self):
+        phone = self.phone_with_old_results()
+        with tempfile.TemporaryDirectory() as directory:
+            collector = Collector(Path(directory), make_records(2), run=phone, expected_model="B")
+            with self.assertRaisesRegex(RuntimeError, "left over from another run"):
+                collector.poll()
+            self.assertEqual(collector.stages, {})
+
+    def test_results_from_the_expected_model_are_accepted(self):
+        phone = self.phone_with_old_results()
+        with tempfile.TemporaryDirectory() as directory:
+            collector = Collector(Path(directory), make_records(2), run=phone, expected_model="A")
+            self.assertEqual(collector.poll(), 1)
 
 
 class ThermalAndPushTests(unittest.TestCase):

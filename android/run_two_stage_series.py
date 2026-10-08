@@ -101,6 +101,22 @@ def push_file(local: Path, remote_name: str, run=adb) -> bool:
     return True
 
 
+def clear_results(run=adb) -> None:
+    """Delete result files left by an earlier run, and make sure they are gone.
+
+    `adb shell` joins its arguments with spaces before the phone's shell parses them, so the script
+    for `sh -c` has to arrive as one quoted argument; otherwise `sh -c` runs a bare `rm` and deletes
+    nothing, and the old run's results get read as this run's.
+    """
+    results = f"{REMOTE_BENCHMARK}/results"
+    run("shell", "run-as", PACKAGE, "sh", "-c", f"'rm -f {results}/s*.json {results}/warmup-*.json'")
+    listing = run("shell", "run-as", PACKAGE, "ls", results)
+    left = [name for name in listing.stdout.split() if RESULT_NAME.match(name) or name.startswith("warmup-")]
+    if left:
+        raise RuntimeError(f"Could not clear earlier results from the phone ({', '.join(left[:4])}...); "
+                           "the run would mix in another run's numbers")
+
+
 def thermal_sample(run=adb) -> dict:
     """Battery temperature (deg C) and Android's thermal status (0 none ... 6 shutdown), when readable."""
     celsius = status = None
@@ -117,8 +133,9 @@ def thermal_sample(run=adb) -> dict:
 class Collector:
     """Pulls result files as the phone writes them and joins the two stages of each image."""
 
-    def __init__(self, output: Path, records: list[dict], run=adb, clock=time.monotonic):
+    def __init__(self, output: Path, records: list[dict], run=adb, clock=time.monotonic, expected_model: str | None = None):
         self.output, self.records, self.run, self.clock = output, records, run, clock
+        self.expected_model = expected_model
         self.started = clock()
         self.stages: dict[tuple[int, int], dict] = {}
         self.finished: set[int] = set()
@@ -155,6 +172,9 @@ class Collector:
                 result = json.loads(fetched.stdout)
             except ValueError:
                 continue  # still being written; the next poll will get it
+            if self.expected_model is not None and result.get("model") != self.expected_model:
+                raise RuntimeError(f"{name} is from model {result.get('model')!r}, not {self.expected_model!r}: "
+                                   "it is left over from another run")
             result["_seen_s"] = round(self.clock() - self.started, 2)
             self.stages[key] = result
             (self.output / "results" / name).write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -274,9 +294,9 @@ def main() -> int:
     pushed = sum(push_file(manifest_path_for(args.manifest, r), r["remote_filename"]) for r in records)
     push_file(output / "series.json", "series.json")
     print(f"Pushed {pushed} new images; starting at image {start}.", flush=True)
-    adb("shell", "run-as", PACKAGE, "sh", "-c", f"rm -f {REMOTE_BENCHMARK}/results/s*.json {REMOTE_BENCHMARK}/results/warmup-*.json")
+    clear_results()
 
-    collector = Collector(output, records)
+    collector = Collector(output, records, expected_model=args.model)
     collector.adopt(finished)
     command = ["adb", "shell", "am", "instrument", "-w", "-r", "-e", "series", "series.json", "-e", "start", str(start),
                "-e", "downloadModel", str(not args.model_already_downloaded).lower(),
