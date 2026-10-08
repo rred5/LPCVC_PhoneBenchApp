@@ -263,6 +263,28 @@ class CoolDownTests(unittest.TestCase):
             self.wait([(None, 0)])
 
 
+class HeatStopTests(unittest.TestCase):
+    def test_too_hot_by_temperature_or_by_critical_status(self):
+        self.assertFalse(runner.too_hot({"battery_c": 49.9, "thermal_status": 3}, 50.0))
+        self.assertTrue(runner.too_hot({"battery_c": 50.0, "thermal_status": 2}, 50.0))
+        self.assertTrue(runner.too_hot({"battery_c": 44.0, "thermal_status": 4}, 50.0))
+        self.assertTrue(runner.too_hot({"battery_c": None, "thermal_status": 5}, 50.0))
+
+    def test_unreadable_or_missing_samples_do_not_stop_a_run(self):
+        self.assertFalse(runner.too_hot(None, 50.0))
+        self.assertFalse(runner.too_hot({"battery_c": None, "thermal_status": None}, 50.0))
+
+    def test_the_collector_keeps_the_latest_sample_for_the_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            phone = FakePhone()
+            collector = Collector(Path(directory), make_records(1), run=phone)
+            collector.poll()
+            phone.battery, phone.thermal = "temperature: 521", "Thermal Status: 4"
+            collector.poll()
+            self.assertTrue(runner.too_hot(collector.last_sample, 50.0))
+            self.assertEqual(collector.last_sample, {"battery_c": 52.1, "thermal_status": 4})
+
+
 class ThermalAndPushTests(unittest.TestCase):
     def test_missing_thermal_service_still_gives_a_battery_reading(self):
         phone = FakePhone()

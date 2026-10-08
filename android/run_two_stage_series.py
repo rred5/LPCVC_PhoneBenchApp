@@ -130,6 +130,14 @@ def thermal_sample(run=adb) -> dict:
     return {"battery_c": celsius, "thermal_status": status}
 
 
+def too_hot(sample: dict | None, limit_c: float) -> bool:
+    """True when the battery is at or above limit_c, or Android reports thermal status critical or worse (4+)."""
+    if not sample:
+        return False
+    celsius, status = sample.get("battery_c"), sample.get("thermal_status")
+    return (celsius is not None and celsius >= limit_c) or (status is not None and status >= 4)
+
+
 def wait_until_cool(limit_c: float, timeout_s: float, run=adb, sleep=time.sleep, clock=time.monotonic,
                     log=lambda message: print(message, flush=True)) -> dict:
     """Block until the battery is at or below limit_c and Android reports thermal status none or light (0-1).
@@ -165,6 +173,7 @@ class Collector:
         self.stages: dict[tuple[int, int], dict] = {}
         self.finished: set[int] = set()
         self.last_battery = None
+        self.last_sample = None
         self.last_finish_battery = None
         (output / "results").mkdir(parents=True, exist_ok=True)
 
@@ -178,6 +187,7 @@ class Collector:
     def sample_temperature(self) -> None:
         sample = thermal_sample(self.run)
         self.last_battery = sample["battery_c"]
+        self.last_sample = sample
         line = {"t_s": round(self.clock() - self.started, 2), **sample}
         with (self.output / "thermal.jsonl").open("a", encoding="utf-8") as file:
             file.write(json.dumps(line) + "\n")
@@ -257,6 +267,9 @@ def main() -> int:
     parser.add_argument("--cool-below-c", type=float, default=None,
                         help="Wait until the battery is at or below this temperature (and thermal status is light or none) before starting")
     parser.add_argument("--cool-timeout-minutes", type=float, default=30.0, help="Give up waiting for the phone to cool after this long")
+    parser.add_argument("--stop-above-c", type=float, default=50.0,
+                        help="Stop the run if the battery reaches this temperature, or Android reports thermal status critical (default 50; "
+                             "a phone at 54 C dropped its adb connection mid-run). The run can be resumed once it has cooled")
     parser.add_argument("--poll-seconds", type=float, default=10.0)
     parser.add_argument("--timeout-hours", type=float, default=8.0)
     parser.add_argument("--dry-run", action="store_true", help="Write series.json and print the plan without touching the phone")
@@ -338,6 +351,7 @@ def main() -> int:
                "-e", "class", f"{PACKAGE}.GenieXTwoStageSeriesTest#testSeries", f"{PACKAGE}.test/androidx.test.runner.AndroidJUnitRunner"]
     started = time.monotonic()
     deadline = started + args.timeout_hours * 3600
+    stopped_for_heat = False
     with (output / "instrumentation.txt").open("w", encoding="utf-8") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, text=True)
         try:
@@ -347,6 +361,11 @@ def main() -> int:
                     break
                 if collector.poll():
                     print(f"{len(collector.finished)}/{len(records)} images, battery {collector.last_battery} C", flush=True)
+                if args.stop_above_c is not None and too_hot(collector.last_sample, args.stop_above_c):
+                    stopped_for_heat = True
+                    print(f"Phone reached {collector.last_sample['battery_c']} C (thermal status {collector.last_sample['thermal_status']}); "
+                          "stopping before it overheats. Let it cool and rerun the same command to resume.", flush=True)
+                    break
                 time.sleep(args.poll_seconds)
         except KeyboardInterrupt:
             print("Interrupted; rerun the same command to resume.", flush=True)
@@ -359,7 +378,7 @@ def main() -> int:
     summary = {
         "images_recorded": len(collector.finished), "images_requested": len(records),
         "host_total_s": round(time.monotonic() - started, 1), "instrument_exit": process.returncode,
-        "instrumentation_ok": "OK (1 test)" in log_text,
+        "instrumentation_ok": "OK (1 test)" in log_text, "stopped_for_heat": stopped_for_heat,
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
