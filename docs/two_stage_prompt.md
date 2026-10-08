@@ -1,11 +1,15 @@
-# Two-stage tamper prompt (draft)
+# Two-stage tamper prompt
 
-Draft for the LPCVC Track 3 comparison of runtimes (`llama_cpp` NPU vs `qairt`) and
-of tampered-image outputs. Not wired into the runner yet; see "Runner notes".
+Prompts for the LPCVC Track 3 comparison of runtimes (`llama_cpp` NPU vs `qairt`) and
+of tampered-image outputs. The text the runner sends lives in
+`android/two_stage_prompts.json`; this page shows it with the reasoning, and
+`android/test_two_stage.py` fails if the two differ.
 
 - **Stage 1** decides real / tampered / fully_fake, names each edited object and the kind
   of edit, and explains why.
-- **Stage 2** returns a bounding box for each edited object in absolute pixel coordinates.
+- **Stage 2** continues the same conversation and returns a bounding box for each edited
+  object in absolute pixel coordinates. It always runs, including when stage 1 says
+  `real` or `fully_fake`.
 
 Both prompts are under the server's 2000-character `max_prompt_chars`.
 
@@ -14,7 +18,9 @@ Both prompts are under the server's 2000-character `max_prompt_chars`.
 | Placeholder | Filled with |
 |---|---|
 | `{width}`, `{height}` | Pixel size of the image actually sent to the phone (the prepared PNG, 768 px longest edge), not of the original. |
-| `{tampered_objects}` | The `tampered_objects` list from the stage 1 JSON, as compact JSON. |
+
+Stage 2 needs no copy of stage 1's objects: it runs in the same conversation, so the
+model still has its own stage 1 answer and the image in context.
 
 ## Stage 1
 
@@ -35,12 +41,9 @@ Use [] for tampered_objects unless classification is "tampered".
 ## Stage 2
 
 ```text
-This image is {width} pixels wide and {height} pixels tall. The origin (0, 0) is the top-left corner. x increases to the right and y increases downward.
+Now locate every tampered object you listed. This image is {width} pixels wide and {height} pixels tall. The origin (0, 0) is the top-left corner. x increases to the right and y increases downward.
 
-These objects were identified as edited:
-{tampered_objects}
-
-For each one, give a tight bounding box in absolute pixel coordinates of this image: [x_min, y_min, x_max, y_max], with x between 0 and {width} and y between 0 and {height}. For a removed object, box the area where it used to be.
+For each tampered object, give a tight bounding box in absolute pixel coordinates of this image: [x_min, y_min, x_max, y_max], with x between 0 and {width} and y between 0 and {height}. For a removed object, box the area where it used to be. If you listed no tampered objects, return an empty list.
 
 Reply with JSON only:
 {"boxes": [{"object": "<name>", "bbox": [x_min, y_min, x_max, y_max]}]}
@@ -72,24 +75,34 @@ Reply with JSON only:
 - **Bounding box, not polygon.** Small VLMs rarely produce reliable polygons and they cost
   more decode tokens. A `polygon` field can be added later.
 
-## Runner notes (not implemented)
+## Runner notes
 
-- **Context.** Stage 2 can continue the stage 1 conversation (reuses the image prefill, which
-  dominates time to first token) or start fresh with `{tampered_objects}` filled in (pays the
-  image prefill again and inflates stage 2 time). Pick one and keep it fixed across runtimes.
-- **Gating.** Run stage 2 only when stage 1 returns a non-empty `tampered_objects`, or always
-  run both. For the inference-time-vs-iteration (thermal) plot, always running both keeps the
-  workload per iteration constant.
-- **Token caps.** Suggested `max_tokens`: 256 for stage 1, 128 for stage 2.
+Decided 2026-10-07:
+
+- **Context.** Stage 2 continues the stage 1 conversation. The image is attached once, in
+  stage 1; the app already keeps the conversation and tokenizes incrementally, so stage 2
+  reuses the image prefill. Stage 2 times are therefore not comparable to a fresh-context
+  stage 2.
+- **Gating.** Stage 2 always runs, so every iteration does the same two calls. Expect a short
+  stage 2 (`{"boxes": []}`) on images the model calls real, which makes stage 2 time depend on
+  the stage 1 verdict. Plots split stage times by expected label for that reason.
+
+Implemented in `android/run_two_stage_series.py` and `GenieXTwoStageSeriesTest.kt`:
+
+- **Token caps.** `max_tokens` is 256 for stage 1 and 128 for stage 2 by default; the app
+  records the stop reason, so a capped answer is visible.
 - **Labels.** The existing harness scores `real` / `synthetic` / `tampered`. This prompt says
-  `fully_fake`; map one to the other in the scorer.
-- **Parsing.** Try strict JSON first, then fall back to the existing lenient parser
-  (`lenient_classification` in `android/run_accuracy_pilot.py`). Report the strict-parse rate;
-  it is itself a model comparison metric.
-- **Ground-truth boxes.** Derive from the masks: `*_target_mask_prompt.png` (Nano Banana) and
-  `*_mask.png` (Qwen-Inpaint), taking the bounding box of the non-zero pixels. Masks are not at
-  the image resolution (for example 288x384 for a 768x1024 image), so compare boxes in
-  coordinates normalized by each image's own width and height, and score IoU.
+  `fully_fake`; the scorer treats `synthetic` and `fully_fake` as the same class.
+- **Parsing.** Strict JSON first, then JSON embedded in other text, then the existing lenient
+  parser (`lenient_classification` in `android/run_accuracy_pilot.py`). The parse mode is
+  recorded per response and the strict-parse rate is reported; it is itself a model
+  comparison metric.
+- **Ground-truth boxes.** Derived from the masks by `android/tamper_dataset.py`:
+  `*_target_mask_prompt.png` (Nano Banana) and `*_mask.png` (Qwen-Inpaint). Masks are not at
+  the image resolution (for example 288x384 for a 768x1024 image), so boxes are compared in
+  coordinates normalized by each image's own width and height. Small noise specks are dropped
+  before taking the union box, and a mask with almost no area (S019: 97 pixels) is flagged
+  low confidence and left out of box scoring.
 
 ## Open risks
 
