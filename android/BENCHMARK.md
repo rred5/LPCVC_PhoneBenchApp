@@ -170,7 +170,22 @@ The analysis scripts need numpy, scipy and matplotlib in addition to Pillow:
    ```
 
 2. **Install the debug app and its test APK** (`run_benchmark.ps1 -BuildAndInstall` builds and
-   installs both), with one unlocked phone connected.
+   installs both), with one unlocked phone connected, plugged in, with a screen timeout longer than
+   the run (a sleeping screen drops the Wi-Fi mid-download and stops the UI steps).
+
+   Notes for the qairt (AI Hub) models:
+
+   - Qwen3-VL needs `geniex-android` 0.8.0 or newer. 0.3.5 looks models up in AI Hub release 0.55.0,
+     which has no Qwen3-VL, and a pull fails with `model ... not found on hub`.
+   - The SDK keeps its AI Hub index in the app's `files/geniex/aihub/` without checking its version.
+     After changing SDK version on a phone, clear it: `adb shell run-as com.geniex.demo rm -rf files/geniex/aihub`.
+   - The catalog's `chipset` must be a name the hub knows for the phone. A Galaxy S26 reports
+     `SM8850` but its bundles are listed under the Galaxy variant, `SM8850-AD` (a Galaxy S25 would be
+     `SM8750-AC`). `adb shell am instrument -w -e class com.geniex.demo.GenieXHubProbeTest
+     com.geniex.demo.test/androidx.test.runner.AndroidJUnitRunner` then `adb logcat -s HubProbe` lists
+     the accepted names.
+   - Download the model once in the app first (select it, tap Download; the 4B bundle is 4.2 GB), then
+     pass `--model-already-downloaded`.
 
 3. **Run a series.** `--model` is the app catalog's display name; its entry says which runtime
    runs it. `--count` is a whole number of real/tampered pairs, balanced over source and edit
@@ -182,8 +197,12 @@ The analysis scripts need numpy, scipy and matplotlib in addition to Pillow:
      --model 'Qwen3-VL-2B-Instruct (GGUF)' --count 50 --output 'C:\path\to\runs\llama_cpp-npu'
    ```
 
-   Keep the phone in the same place, at the same charge, and let it cool between runs of different
-   models. The runner records battery temperature and Android's thermal status on every poll.
+   Keep the phone in the same place and on the same charger, and let it cool between runs of
+   different models: `--cool-below-c 40` makes a run wait until the battery is at or below that
+   temperature and Android's thermal status is none or light, and records the temperature it started
+   from in `run-settings.json`. (Fast charging holds an idle phone near 37-38 C, so a lower limit
+   cannot be reached while plugged in.) The runner records battery temperature and Android's
+   thermal status on every poll.
 
 4. **Score and plot.** Up to three runs are compared side by side. `--convention calibrate`
    (the default) picks the coordinate scale (pixels, 0-1000, or 0-1) that best explains each
@@ -218,3 +237,10 @@ How the numbers are defined:
 Limits: the second turn depends on the SDK's incremental tokenization and on the context being big
 enough for image, both prompts and both answers; a stage that errors is recorded as missing rather
 than guessed. Selecting NPU records the requested compute unit, not proof that every stage used it.
+
+The same model on two runtimes does not see the same pixels: the Qwen3-VL qairt bundle's vision
+encoder takes a fixed 32x32 patch grid (about 512x512 px, 256 image tokens), while llama_cpp uses a
+higher, variable resolution. Prompt token counts include the image tokens on SDK 0.8.0 (they did not
+for llama_cpp on 0.3.5), so do not compare numbers across SDK versions. "Levels off" cannot be read
+from a run that ends before the time stops rising: a run that is still drifting at its last image
+reports the last few images as stable.

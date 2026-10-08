@@ -78,10 +78,15 @@ def find_stabilization(values: list[float], window: int = STABILITY_WINDOW, tole
     initial = statistics.median(values[:window])
     if abs(initial - steady) <= tolerance * steady:
         first_ok = 0  # never left the band: no drift to report
+    drifted = abs(initial - steady) > tolerance * steady
+    held = len(values) - first_ok
+    # The steady level is the median of the last quarter, so a series that only entered the band
+    # inside that quarter has not shown a plateau, it has just run out of images.
+    plateau_reached = not drifted or held >= max(2 * window, math.ceil(tail_fraction * len(values)))
     return {"iteration": first_ok + 1, "steady": steady, "initial": initial,
             "change_pct": (steady - initial) / initial * 100 if initial else None,
-            "drifted": abs(initial - steady) > tolerance * steady, "window": window, "tolerance": tolerance,
-            "points": len(values)}
+            "drifted": drifted, "held_images": held, "plateau_reached": plateau_reached,
+            "window": window, "tolerance": tolerance, "points": len(values)}
 
 
 def load_run(directory: Path, records: dict[str, dict]) -> dict:
@@ -253,6 +258,29 @@ def write_scored_csv(scored: dict, path: Path) -> None:
         writer.writerows(rows)
 
 
+def render_thermal_lines(all_metrics: list[dict]) -> list[str]:
+    """One bullet per run and series saying whether the time drifted and where it levels off."""
+    lines = []
+    for m in all_metrics:
+        for name, series in (("stage 1 time per image", "stage1_s"), ("stage 1 ms per token", "stage1_ms_per_token"),
+                             ("time per image, both stages", "per_image_s")):
+            s = m["stabilization"][series]
+            if s is None:
+                lines.append(f"- **{m['label']}**, {name}: too few images to judge (needs {3 * STABILITY_WINDOW}).")
+            elif not s["drifted"]:
+                lines.append(f"- **{m['label']}**, {name}: no drift beyond {s['tolerance'] * 100:.0f}% (steady near {s['steady']:.1f}).")
+            elif not s["plateau_reached"]:
+                lines.append(f"- **{m['label']}**, {name}: moved {s['change_pct']:+.0f}% (from {s['initial']:.1f} to {s['steady']:.1f}) and was "
+                             f"still moving toward the end: it came within {s['tolerance'] * 100:.0f}% of its final level only for the last "
+                             f"{s['held_images']} of {s['points']} images, so no plateau is shown. A longer run is needed.")
+            else:
+                lines.append(f"- **{m['label']}**, {name}: moved {s['change_pct']:+.0f}% (from {s['initial']:.1f} to {s['steady']:.1f}) and held "
+                             f"within {s['tolerance'] * 100:.0f}% from image {s['iteration']} on.")
+        t = m["temperature_c"]
+        lines.append(f"- **{m['label']}**, battery temperature: {_num(t['first'])} C to {_num(t['last'])} C (max {_num(t['max'])} C).")
+    return lines
+
+
 def write_report(all_metrics: list[dict], path: Path, figures: list[str]) -> None:
     lines = ["# Two-stage tamper run report", ""]
     header = ["", *[m["label"] for m in all_metrics]]
@@ -279,19 +307,7 @@ def write_report(all_metrics: list[dict], path: Path, figures: list[str]) -> Non
     lines += ["", "## Thermal drift", ""]
     lines += ["Judged on stage 1 time and decode time per token, which do comparable work for every image. "
               "The both-stage total also depends on how long stage 2 runs, so it settles later and less cleanly.", ""]
-    for m in all_metrics:
-        for name, series in (("stage 1 time per image", "stage1_s"), ("stage 1 ms per token", "stage1_ms_per_token"),
-                             ("time per image, both stages", "per_image_s")):
-            s = m["stabilization"][series]
-            if s is None:
-                lines.append(f"- **{m['label']}**, {name}: too few images to judge (needs {3 * STABILITY_WINDOW}).")
-            elif not s["drifted"]:
-                lines.append(f"- **{m['label']}**, {name}: no drift beyond {s['tolerance'] * 100:.0f}% (steady near {s['steady']:.1f}).")
-            else:
-                lines.append(f"- **{m['label']}**, {name}: moved {s['change_pct']:+.0f}% (from {s['initial']:.1f} to {s['steady']:.1f}) and held "
-                             f"within {s['tolerance'] * 100:.0f}% from image {s['iteration']} on.")
-        t = m["temperature_c"]
-        lines.append(f"- **{m['label']}**, battery temperature: {_num(t['first'])} C to {_num(t['last'])} C (max {_num(t['max'])} C).")
+    lines += render_thermal_lines(all_metrics)
     lines += ["", "## Verdict", ""] + table([
         ("3-class accuracy", [_pct(m["verdict"]["three_class_accuracy"]) for m in all_metrics]),
         ("Real vs manipulated accuracy", [_pct(m["verdict"]["binary_accuracy"]) for m in all_metrics]),

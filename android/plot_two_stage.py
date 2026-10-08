@@ -158,7 +158,7 @@ def timing_summary(scored: dict, metrics: dict, t: dict, path: Path) -> str:
         _dots(ax, x, values, tampered, color, t)
     stable = metrics["stabilization"]["stage1_s"]
     handles = [Line2D([], [], color=blue, lw=2, label="Stage 1"), Line2D([], [], color=orange, lw=2, label="Stage 2"), *_label_key(t)]
-    if stable and stable["drifted"]:
+    if stable and stable["drifted"] and stable["plateau_reached"]:
         ax.axvline(stable["iteration"], color=t["muted"], lw=1)
         handles.append(Line2D([], [], color=t["muted"], lw=1, label=f"stage 1 levels off: image {stable['iteration']}"))
     ax.set_title("Inference time per image")
@@ -220,13 +220,20 @@ def thermal(scored: dict, metrics: dict, t: dict, path: Path) -> str:
     blue, orange = t["stage"]
     stage1 = _array([r["stage1_inference_s"] for r in rows])
     stable = metrics["stabilization"]["stage1_s"]
+    per_token = metrics["stabilization"]["stage1_ms_per_token"]
     fig = plt.figure(figsize=(11, 9.2))
     grid = GridSpec(3, 1, figure=fig, left=0.08, right=0.97, top=0.87, bottom=0.07, hspace=0.45, height_ratios=[1.3, 1, 0.8])
     if stable is None:
         headline = f"{metrics['label']}: too few images to judge thermal drift"
+    elif stable["drifted"] and per_token is not None and not per_token["drifted"]:
+        headline = (f"{metrics['label']}: stage 1 time varies with answer length, but decode time per token held at about "
+                    f"{per_token['steady']:.0f} ms, so no slowdown from heat in {len(rows)} images")
+    elif stable["drifted"] and not stable["plateau_reached"]:
+        headline = (f"{metrics['label']}: stage 1 time moved {stable['change_pct']:+.0f}% and was still moving when the "
+                    f"run ended ({len(rows)} images); no plateau shown")
     elif stable["drifted"]:
         headline = (f"{metrics['label']}: stage 1 time moved {stable['change_pct']:+.0f}% and levels off near image "
-                    f"{stable['iteration']}, at about {stable['steady']:.0f} s")
+                    f"{stable['iteration']}, at about {stable['steady']:.1f} s")
     else:
         headline = f"{metrics['label']}: no thermal drift beyond {stable['tolerance'] * 100:.0f}% in {len(rows)} images"
     _headline(fig, t, headline, _subtitle(metrics))
@@ -239,7 +246,7 @@ def thermal(scored: dict, metrics: dict, t: dict, path: Path) -> str:
         ax.axhspan(stable["steady"] * (1 - stable["tolerance"]), stable["steady"] * (1 + stable["tolerance"]),
                    color=t["muted"], alpha=0.14, lw=0)
         handles.append(Patch(facecolor=t["muted"], alpha=0.3, label=f"steady level {stable['steady']:.0f} s, +/-{stable['tolerance'] * 100:.0f}%"))
-        if stable["drifted"]:
+        if stable["drifted"] and stable["plateau_reached"]:
             ax.axvline(stable["iteration"], color=t["muted"], lw=1)
             handles.append(Line2D([], [], color=t["muted"], lw=1, label=f"levels off: image {stable['iteration']}"))
     ax.set_title("Stage 1 inference time per image")

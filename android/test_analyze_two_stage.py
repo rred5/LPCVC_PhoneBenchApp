@@ -17,7 +17,7 @@ from unittest.mock import patch
 from PIL import Image
 
 import analyze_two_stage as analyze
-from analyze_two_stage import describe, find_stabilization, rate
+from analyze_two_stage import describe, find_stabilization, rate, render_thermal_lines
 from tamper_dataset import select_records
 
 
@@ -112,6 +112,25 @@ class StabilizationTests(unittest.TestCase):
         result = find_stabilization([10 + i * 0.5 for i in range(60)])
         self.assertTrue(result["drifted"])
         self.assertGreater(result["iteration"], 45)
+
+    def test_a_plateau_needs_more_than_the_last_few_images(self):
+        rising = find_stabilization([10 + i * 0.5 for i in range(60)])
+        self.assertFalse(rising["plateau_reached"])
+        self.assertLess(rising["held_images"], 15)
+        leveled = find_stabilization(self.ramp())
+        self.assertTrue(leveled["plateau_reached"])
+        self.assertGreaterEqual(leveled["held_images"], 20)
+        self.assertTrue(find_stabilization(self.ramp(low=10.0, high=10.0))["plateau_reached"])
+
+    def test_report_says_no_plateau_instead_of_naming_a_level_off_image(self):
+        with tempfile.TemporaryDirectory() as folder:
+            rising = {"iteration": 49, "steady": 4.7, "initial": 3.9, "change_pct": 20.0, "drifted": True, "held_images": 2,
+                      "plateau_reached": False, "window": 7, "tolerance": 0.1, "points": 50}
+            metrics = {"label": "qairt", "stabilization": {"stage1_s": rising, "stage1_ms_per_token": None, "per_image_s": None},
+                       "temperature_c": {"first": 40.0, "last": 41.0, "max": 41.0}}
+            text = "\n".join(render_thermal_lines([metrics]))
+        self.assertIn("no plateau is shown", text)
+        self.assertNotIn("held within 10% from image 49", text)
 
     def test_too_few_points_gives_no_answer(self):
         self.assertIsNone(find_stabilization([1.0] * 10))
