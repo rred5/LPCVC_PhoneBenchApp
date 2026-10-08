@@ -130,6 +130,31 @@ def thermal_sample(run=adb) -> dict:
     return {"battery_c": celsius, "thermal_status": status}
 
 
+def wait_until_cool(limit_c: float, timeout_s: float, run=adb, sleep=time.sleep, clock=time.monotonic,
+                    log=lambda message: print(message, flush=True)) -> dict:
+    """Block until the battery is at or below limit_c and Android reports thermal status none or light (0-1).
+
+    Two runs only compare fairly when they start from a similar temperature, so each run waits here first.
+    Returns the sample the run starts from.
+    """
+    deadline = clock() + timeout_s
+    last_log = None
+    while True:
+        sample = thermal_sample(run)
+        celsius, status = sample["battery_c"], sample["thermal_status"]
+        if celsius is None:
+            raise RuntimeError("Cannot read the battery temperature, so cannot wait for the phone to cool")
+        if celsius <= limit_c and (status is None or status <= 1):
+            return sample
+        if clock() >= deadline:
+            raise RuntimeError(f"Phone is still at {celsius} C (thermal status {status}) after {timeout_s / 60:.0f} minutes; "
+                               "raise --cool-below-c or give it more time to rest")
+        if last_log is None or clock() - last_log >= 60:
+            log(f"Waiting for the phone to cool: {celsius} C (thermal status {status}), want {limit_c} C or less")
+            last_log = clock()
+        sleep(15)
+
+
 class Collector:
     """Pulls result files as the phone writes them and joins the two stages of each image."""
 
@@ -229,6 +254,9 @@ def main() -> int:
     parser.add_argument("--max-tokens-stage1", type=int, default=256)
     parser.add_argument("--max-tokens-stage2", type=int, default=128)
     parser.add_argument("--model-already-downloaded", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--cool-below-c", type=float, default=None,
+                        help="Wait until the battery is at or below this temperature (and thermal status is light or none) before starting")
+    parser.add_argument("--cool-timeout-minutes", type=float, default=30.0, help="Give up waiting for the phone to cool after this long")
     parser.add_argument("--poll-seconds", type=float, default=10.0)
     parser.add_argument("--timeout-hours", type=float, default=8.0)
     parser.add_argument("--dry-run", action="store_true", help="Write series.json and print the plan without touching the phone")
@@ -295,6 +323,13 @@ def main() -> int:
     push_file(output / "series.json", "series.json")
     print(f"Pushed {pushed} new images; starting at image {start}.", flush=True)
     clear_results()
+    try:
+        start_thermal = wait_until_cool(args.cool_below_c, args.cool_timeout_minutes * 60) if args.cool_below_c is not None else thermal_sample()
+    except RuntimeError as error:
+        parser.error(str(error))
+    # A resumed run keeps the temperature it first started from.
+    settings["start_thermal"] = json.loads(settings_path.read_text(encoding="utf-8")).get("start_thermal") or start_thermal
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     collector = Collector(output, records, expected_model=args.model)
     collector.adopt(finished)

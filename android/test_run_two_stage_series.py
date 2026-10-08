@@ -213,6 +213,56 @@ class EarlierRunTests(unittest.TestCase):
             self.assertEqual(collector.poll(), 1)
 
 
+class CoolingPhone:
+    """Reports one (tenths of a degree, thermal status) reading per thermal_sample call, then holds the last one."""
+
+    def __init__(self, readings):
+        self.readings, self.index = readings, -1
+
+    def __call__(self, *args, timeout=30):
+        if args[:3] == ("shell", "dumpsys", "battery"):
+            self.index += 1
+            tenths = self.readings[min(self.index, len(self.readings) - 1)][0]
+            return SimpleNamespace(returncode=0, stdout="" if tenths is None else f"temperature: {tenths}", stderr="")
+        status = self.readings[min(self.index, len(self.readings) - 1)][1]
+        return SimpleNamespace(returncode=0, stdout=f"Thermal Status: {status}", stderr="")
+
+
+class CoolDownTests(unittest.TestCase):
+    def wait(self, readings, limit=34.0, timeout=600.0):
+        now = [0.0]
+        sleeps, messages = [], []
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        sample = runner.wait_until_cool(limit, timeout, run=CoolingPhone(readings), sleep=sleep, clock=lambda: now[0], log=messages.append)
+        return sample, sleeps, messages
+
+    def test_starts_at_once_when_the_phone_is_already_cool(self):
+        sample, sleeps, _ = self.wait([(318, 0)])
+        self.assertEqual((sample, sleeps), ({"battery_c": 31.8, "thermal_status": 0}, []))
+
+    def test_waits_until_the_battery_is_at_or_below_the_limit(self):
+        sample, sleeps, messages = self.wait([(445, 3), (421, 2), (352, 1), (338, 1)])
+        self.assertEqual(sample["battery_c"], 33.8)
+        self.assertEqual(len(sleeps), 3)
+        self.assertEqual(len(messages), 1)  # logged once, not on every poll
+
+    def test_a_cool_battery_is_not_enough_while_android_still_reports_throttling(self):
+        sample, sleeps, _ = self.wait([(330, 2), (329, 2), (328, 1)])
+        self.assertEqual((sample["thermal_status"], len(sleeps)), (1, 2))
+
+    def test_gives_up_when_the_phone_never_cools(self):
+        with self.assertRaisesRegex(RuntimeError, "still at 42.0 C"):
+            self.wait([(420, 2)], timeout=120)
+
+    def test_unreadable_temperature_is_an_error_not_a_hang(self):
+        with self.assertRaisesRegex(RuntimeError, "Cannot read the battery temperature"):
+            self.wait([(None, 0)])
+
+
 class ThermalAndPushTests(unittest.TestCase):
     def test_missing_thermal_service_still_gives_a_battery_reading(self):
         phone = FakePhone()
