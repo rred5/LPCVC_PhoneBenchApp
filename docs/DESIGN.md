@@ -1,7 +1,9 @@
 # LPCVC PhoneBench — design
 
-Status: draft for review, 2026-10-01. Phase 1, part 1 (repo import) is done;
-nothing below it is built yet.
+Status: living document, last updated 2026-10-08. Phases 2 and 3 are done and
+the site is live. Phase 1 is partly done: parts 1–3 are done, part 4 works but
+is not fully tested, and parts 5–7 are still to do. Phase 4 is open. See
+[Build plan](#build-plan).
 
 ## Goal
 
@@ -288,8 +290,27 @@ Validation baseline (image L106, 10 runs per cell, 2026-09-18):
 | Cold | GPU | 9.6 s | 36.1 |
 | Cold | NPU | 11.8 s | 27.2 |
 
-Cold beat warm on GPU and NPU in that baseline, which is unexpected; re-check
-it with the new runner.
+Cold GPU completed 9 of its 10 runs; every other cell completed all 10. Cold
+beat warm on GPU and NPU in that baseline, which is unexpected; re-check it
+with the new runner.
+
+The baseline was measured before the context-reset fix of 2026-09-21, and no
+full re-run is recorded since. The one post-fix reading, a single warm NPU run,
+had a first token of 11.1 s against 14.8 s above, so treat the warm rows as
+provisional until they are re-measured.
+
+Accuracy pilot (2026-09-20; Qwen3-VL-2B-Instruct, warm NPU, the original
+freeform prompt): 3 image groups (I016, L080, L104), each as the original, a
+realistic edit and an obvious edit, 3 runs each, 27 runs in all. The model
+answered `real` 21 times and `tampered` once. It flagged 6 of the 18
+manipulated cases (sensitivity 33%) and called all 9 original runs real
+(specificity 100%). 3-class accuracy was 37.0% against 33.3% for always
+answering `real`; real-vs-manipulated was 55.6%. The first scoring pass
+reported 0% because the parser required an exact label; the lenient,
+negation-aware scorer fixed that. First token rose from 14.3 s on the first run
+to 29.3 s on the last, consistent with thermal throttling but not confirmed,
+and 2 of the 27 runs hit the 2048-token cap. This is a small, one-backend
+sample: use it as a reference point for validation, not as a result.
 
 ## Security
 
@@ -384,7 +405,8 @@ built.
    a reboot, hours with the screen off.
 5. Add the status screen.
 6. Validate against the 2026-09-18 baseline and a small accuracy pilot
-   (I016, L080, L104); test running alongside the chat app. Warm NPU decode
+   (I016, L080, L104; both are under [Benchmark validity](#benchmark-validity));
+   test running alongside the chat app. Warm NPU decode
    speed differs between readings and needs explaining: 25.5 tok/s in the
    baseline, 20.7 in the first PhoneBench test, 32.7 on the first run of
    the first cloud job.
