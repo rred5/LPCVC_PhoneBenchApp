@@ -41,6 +41,9 @@ interface InferenceEngine {
     /** Download [modelId] unless it is already on the phone. */
     suspend fun ensureDownloaded(modelId: String, onProgress: (percent: Int) -> Unit)
 
+    /** Install [modelId] from a bundle already on the phone, replacing any copy. */
+    suspend fun importModel(modelId: String, archive: java.io.File)
+
     /** Load [modelId] on [backend], replacing whatever is loaded. */
     suspend fun load(modelId: String, backend: Backend): LoadResult
 
