@@ -2,6 +2,10 @@
 
 The format is the harness's schema_version 1 settings file, extended with
 `run.models`, `run.prompts` and `run.images` lists (see docs/DESIGN.md).
+
+A prompt is text, or a list of turns asked in order in one conversation (the
+image goes with the first turn). `{width}` and `{height}` in a turn are filled
+in on the phone with the prepared image's size.
 """
 
 import copy
@@ -53,6 +57,22 @@ def _unique_strings(name: str, value) -> list[str]:
     _require(isinstance(value, list) and all(isinstance(item, str) for item in value), f"{name} must be a list of strings")
     _require(len(value) == len(set(value)), f"{name} must not repeat entries")
     return list(value)
+
+
+def _prompt(prompt, limits: dict):
+    """A prompt as text (one turn) or a list of two or more turns."""
+    turns = prompt if isinstance(prompt, list) else [prompt]
+    _require(turns, "A prompt's list of turns must not be empty")
+    _require(len(turns) <= limits["max_turns"], f"A prompt allows at most {limits['max_turns']} turns")
+    for turn in turns:
+        _require(isinstance(turn, str) and turn.strip(), "Each prompt and turn must be non-empty text")
+        _require(len(turn) <= limits["max_prompt_chars"], f"Each prompt and turn allows at most {limits['max_prompt_chars']} characters")
+    return turns[0] if len(turns) == 1 else list(turns)
+
+
+def turns(prompt) -> list[str]:
+    """A resolved prompt's turns, in order."""
+    return list(prompt) if isinstance(prompt, list) else [prompt]
 
 
 def resolve(overrides: dict, config: Config) -> dict:
@@ -115,9 +135,7 @@ def resolve(overrides: dict, config: Config) -> dict:
     prompts = run["prompts"]
     _require(isinstance(prompts, list) and prompts, "run.prompts must be a non-empty list")
     _require(len(prompts) <= limits["max_prompts"], f"run.prompts allows at most {limits['max_prompts']} prompts")
-    for prompt in prompts:
-        _require(isinstance(prompt, str) and prompt.strip(), "Each prompt must be non-empty text")
-        _require(len(prompt) <= limits["max_prompt_chars"], f"Each prompt allows at most {limits['max_prompt_chars']} characters")
+    prompts = [_prompt(prompt, limits) for prompt in prompts]
 
     images = _unique_strings("run.images", run["images"])
     _require(images, "run.images must list at least one image")

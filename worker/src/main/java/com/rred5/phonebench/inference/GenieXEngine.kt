@@ -148,11 +148,25 @@ class GenieXEngine(
         check(code == 0) { "Context reset failed with code $code" }
     }
 
-    override suspend fun run(imagePath: String, prompt: String, maxTokens: Int): RunOutput {
+    override suspend fun run(imagePath: String, turns: List<String>, maxTokens: Int): List<RunOutput> {
         val vlm = checkNotNull(wrapper) { "No model loaded" }
-        // Same content order as the demo app: image first, then text.
-        val message = VlmChatMessage(role = "user", contents = listOf(VlmContent("image", imagePath), VlmContent("text", prompt)))
-        val template = vlm.applyChatTemplate(arrayOf(message), null, false).getOrThrow()
+        // Follow-up turns continue the conversation as the demo app's chat does: the template
+        // covers the whole history, and the assistant's replies are part of it.
+        val history = mutableListOf<VlmChatMessage>()
+        return turns.mapIndexed { index, text ->
+            // Same content order as the demo app: image first, then text. Only the first turn has the image.
+            val contents = if (index == 0) listOf(VlmContent("image", imagePath), VlmContent("text", text)) else listOf(VlmContent("text", text))
+            val message = VlmChatMessage(role = "user", contents = contents)
+            history += message
+            val output = generate(vlm, history, message, maxTokens)
+            history += VlmChatMessage(role = "assistant", contents = listOf(VlmContent("text", output.response)))
+            output
+        }
+    }
+
+    private suspend fun generate(vlm: VlmWrapper, history: List<VlmChatMessage>, message: VlmChatMessage, maxTokens: Int): RunOutput {
+        val template = vlm.applyChatTemplate(history.toTypedArray(), null, false).getOrThrow()
+        // Only the new message's media: the SDK tokenizes the conversation incrementally.
         val config =
             vlm.injectMediaPathsToConfig(
                 arrayOf(message),

@@ -94,7 +94,9 @@ not render images.
 
 A job is models × compute units × images × prompts × repetitions. Benchmark,
 accuracy and model-comparison runs are the same kind of job; the output
-settings decide what comes back.
+settings decide what comes back. A prompt may be a list of turns asked in one
+conversation (the two-stage tamper prompt, for example); the turns are one
+run, and each turn's response and metrics come back.
 
 The format is the existing settings file (`android/benchmark_defaults.json`,
 `schema_version` 1) with these changes: `run.images` replaces `image` and
@@ -145,10 +147,19 @@ Vision models in the catalog:
 | Qwen3.5-2B | CPU, GPU, NPU | — |
 | Qwen3-VL-2B-Instruct | CPU, GPU, NPU | 2.5 GB |
 | Qwen3-VL-4B-Instruct | CPU, GPU, NPU | 3.7 GB |
-| Qwen2.5-VL-7B-Instruct | NPU only (QAIRT bundle) | — |
+| Qwen2.5-VL-7B-Instruct | NPU only (QAIRT) | 4.6 GB |
+| Qwen3-VL-4B-Instruct | NPU only (QAIRT) | 2.8 GB |
+| Qwen3-VL-8B-Instruct | NPU only (QAIRT) | 4.9 GB |
+| InternVL3.5-2B | NPU only (QAIRT) | 2.2 GB |
+| InternVL3.5-4B | NPU only (QAIRT) | 3.5 GB |
+| Gemma-4-E4B-it | NPU only (QAIRT) | 8.5 GB |
 
-The Qwen2.5-VL-7B bundle in the catalog is built for SM8750; our phone is an
-SM8850, so it may not run (see [To verify](#to-verify)).
+The QAIRT sizes are the download. The bundles come from AI Hub release
+0.64.0, built for the Galaxy S26 (`SM8850-AD`) with QAIRT 2.45, which is the
+runtime GenieX SDK 0.8.0 ships; the app pins that release because GenieX
+otherwise pulls the latest one, whose bundles need a newer QAIRT. The SDK
+holds a download in memory, so bundles too large for that are fetched on a
+PC and installed from a file over adb (worker/README.md).
 
 The exact unit of work the phone pulls, and the phone's API, are specified in
 `docs/API.md` (phase 1, part 2). The proposal: one unit is one compute unit of
@@ -459,7 +470,6 @@ These are assumptions, not yet tested:
 - Whether a larger `max_edge` changes what the model sees. llama.cpp may
   resize images to the vision tower's own size, and the SDK reported only 63
   prompt tokens for a 768 px image, so image tokens may not be counted there.
-- Whether the Qwen2.5-VL-7B bundle built for SM8750 runs on our SM8850.
 
 ## Notes for later
 
@@ -530,6 +540,11 @@ These are assumptions, not yet tested:
   rather than counted as a crash; cleanup never fails phone requests; reads
   skip the write lock; per-person upload caps; Google-only sign-in enforced
   by the server.
+- 2026-10-26 — The worker moves to GenieX SDK 0.8.0 (app 0.3.0) and adds
+  the AI Hub QAIRT vision models, pinned to AI Hub release 0.64.0. Prompts
+  can have several turns in one conversation, so the two-stage tamper prompt
+  runs through PhoneBench; no schema change (the turns live in the job's
+  settings and the run's report). The server requires app 0.3.0.
 - 2026-10-05 — Job-setting profiles on the website live in the browser's
   local storage, per signed-in email, with a built-in Default and nothing
   stored on the server yet. A profile holds only the eight settings (never

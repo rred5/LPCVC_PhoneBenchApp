@@ -67,7 +67,7 @@ adb install -r build\outputs\apk\debug\phonebench-debug.apk
 ```
 
 The first build downloads a few libraries; later builds can add `--offline`.
-The server requires app version 0.2.0 or newer (`versionName` in
+The server requires app version 0.3.0 or newer (`versionName` in
 `worker\build.gradle`); an older app shows "Update the app".
 
 ### 3. Set up the phone
@@ -187,12 +187,12 @@ A JSON file that overrides any part of the defaults. Example:
 | Field | Meaning | Allowed | Default |
 |---|---|---|---|
 | `run.models` | Models to compare | IDs below | `["Qwen3-VL-2B-Instruct-GGUF"]` |
-| `run.prompts` | Prompts to compare | 1–5, each ≤ 2,000 characters | the LPCVC prompt |
+| `run.prompts` | Prompts to compare. A prompt is text, or a list of turns asked in order in one conversation (see below) | 1–5 prompts, each up to 4 turns of ≤ 2,000 characters | the LPCVC prompt |
 | `run.backends` | Compute units | any of `CPU`, `GPU`, `NPU` | `["NPU"]` |
 | `run.mode` | `Warm`: load once, one excluded warm-up, context reset before each run. `Cold`: load and unload for every run | `Warm`, `Cold` | `Warm` |
 | `run.repetitions` | Runs per image and prompt | 1–30 | 10 |
 | `run.rest_seconds` | Pause between runs | 0–60 | 10 |
-| `run.max_tokens` | Longest response | 1–4096 | 2048 |
+| `run.max_tokens` | Longest response, per turn | 1–4096 | 2048 |
 | `preprocessing.max_edge` | Long edge of the image sent to the model | 256–2048 | 768 |
 | `output.save_response` | Keep response text in `runs.csv` | true/false | true |
 | `output.save_raw_result` | Keep each run's raw JSON | true/false | true |
@@ -200,6 +200,20 @@ A JSON file that overrides any part of the defaults. Example:
 | `output.metrics` | Metric columns | any of `prompt_tokens`, `generated_tokens`, `reported_total_tokens`, `ttft_ms`, `prefill_tok_s`, `decode_tok_s` | all six |
 
 The harness's old single `model` and `prompt` fields still work.
+
+**Multi-turn prompts.** A prompt given as a list is one conversation per
+run, like the two-stage harness: the image goes with the first turn, and
+each later turn follows in the same chat with no reset. `{width}` and
+`{height}` in any turn become the prepared image's size in pixels; other
+braces are left alone, so JSON in a prompt is fine. Turns do not add runs.
+
+```json
+"prompts": [
+  "Is this image real, fully synthetic, or tampered?",
+  ["Decide if this image is real, tampered, or fully_fake … Reply with JSON only …",
+   "Now locate every tampered object you listed. This image is {width} pixels wide and {height} pixels tall …"]
+]
+```
 `run.images` is filled in by `submit`; `image` and `pairs` are not accepted.
 
 Model IDs ([config/models.json](../config/models.json)):
@@ -210,7 +224,18 @@ Model IDs ([config/models.json](../config/models.json)):
 | `Qwen3.5-2B-GGUF` | CPU, GPU, NPU |
 | `Qwen3-VL-2B-Instruct-GGUF` | CPU, GPU, NPU |
 | `Qwen3-VL-4B-Instruct-GGUF` | CPU, GPU, NPU |
-| `Qwen2.5-VL-7B-Instruct` | NPU only; built for SM8750 and may not run on this phone (SM8850) |
+| `Qwen2.5-VL-7B-Instruct` | NPU only (QAIRT) |
+| `Qwen3-VL-4B-Instruct` | NPU only (QAIRT) |
+| `Qwen3-VL-8B-Instruct` | NPU only (QAIRT) |
+| `InternVL3.5-2B` | NPU only (QAIRT) |
+| `InternVL3.5-4B` | NPU only (QAIRT) |
+| `Gemma-4-E4B-it` | NPU only (QAIRT); an 8.5 GB bundle that may not fit in the phone's memory |
+
+The QAIRT models are AI Hub bundles from release 0.64.0, built for the
+Galaxy S26 (`SM8850-AD`) with QAIRT 2.45, the runtime in GenieX SDK 0.8.0.
+The app pins that release: newer ones are built with a newer QAIRT. The
+Qwen3-VL bundles resize every image to a fixed 512×512 inside the model, so
+`max_edge` does not change what they see.
 
 **Job size.** Runs = models × backends × images × prompts × repetitions; the
 limit is 500 per job, and at most 3 jobs can be queued or running at once. A
@@ -254,7 +279,8 @@ results so far while a job is running.
 
 | File | Contents |
 |---|---|
-| `runs.csv` | One row per run, in the order they ran (see below) |
+| `runs.csv` | One row per run, in the order they ran (see below). For a multi-turn prompt the response, metrics and scores are the first turn's |
+| `turns.csv` | Only when a prompt has several turns: one row per turn of those runs, with `turn` (1-based), status, metrics and response |
 | `summary.json` | Per model, compute unit and prompt: attempted, passed, failed, and the mean and SD of each metric over passed runs |
 | `accuracy.json` | Only when some images are labeled. Per model, compute unit and prompt, overall and per label: strict, lenient and real-vs-manipulated accuracy. A failed run counts as attempted and wrong |
 | `job.json` | The job, its full settings, its images (name, label, size, SHA-256) and prompts |
@@ -267,10 +293,11 @@ results so far while a job is running.
 | `sequence`, `run_id` | Run order and ID |
 | `model`, `backend`, `mode` | What ran |
 | `image`, `label`, `prompt`, `repetition` | Image path within your folder, its label, prompt number (1-based), repetition |
+| `turns` | How many turns the prompt has |
 | `status` | `passed`, `failed`, `cancelled` or `not_run` |
 | `prompt_tokens` … `decode_tok_s` | The metrics chosen in `output.metrics` |
 | `load_ms` | Model load time, on the run that loaded it |
-| `warm`, `runtime`, `compute_unit`, `framework`, `framework_version` | How it ran (e.g. `geniex 0.3.5`, `llama_cpp`) |
+| `warm`, `runtime`, `compute_unit`, `framework`, `framework_version` | How it ran (e.g. `geniex 0.8.0`, `qairt`) |
 | `battery_c`, `thermal_status`, `free_memory_mb` | Phone condition after the run |
 | `started_utc`, `finished_utc`, `elapsed_s` | Timing |
 | `response`, `error` | The model's answer, or why the run failed |
@@ -422,7 +449,8 @@ the member list.
 
 - **New job:** a name; a folder (or files) of images, where subfolders named
   `real`, `synthetic` or `tampered` label them; models; compute units; warm
-  or cold; prompts (up to 5, compared side by side); repetitions, rest,
+  or cold; prompts (up to 5, compared side by side, each with up to 3
+  follow-up turns in the same conversation); repetitions, rest,
   max tokens and image size. Submitting uploads and prepares the images, 20
   at a time, then queues the job.
 - **Review files** (under Images, once you have chosen some): opens the
@@ -437,7 +465,7 @@ the member list.
 - **Jobs:** every job with status and progress; Cancel on your own jobs (an
   admin can cancel any). Click a job for its runs (first-token time, decode
   speed, tokens, verdict for labeled images, the response) and downloads:
-  `runs.csv`, `summary.json`, `accuracy.json`, or everything as a zip.
+  `runs.csv`, `turns.csv` (multi-turn jobs), `summary.json`, `accuracy.json`, or everything as a zip.
 - **Phone status** at the top: idle, running, paused, or offline with when it
   was last seen.
 
@@ -513,7 +541,7 @@ Redeploy after changing them.
    `https://<site>.vercel.app`; redirect URLs `https://<site>.vercel.app/**`
    and `http://localhost:5173/**`.
 
-**3. The phone** (app 0.2.0 or newer), over adb once; after that it needs
+**3. The phone** (app 0.3.0 or newer), over adb once; after that it needs
 only Wi-Fi and a charger:
 
 ```powershell

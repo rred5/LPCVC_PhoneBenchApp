@@ -50,8 +50,11 @@ interface InferenceEngine {
     /** Clear the context so the next run starts fresh. */
     suspend fun reset()
 
-    /** Run one image + prompt turn. Throws if generation fails. */
-    suspend fun run(imagePath: String, prompt: String, maxTokens: Int): RunOutput
+    /**
+     * Run one conversation about an image: each turn in order, the image with the first.
+     * Returns one output per turn. Throws if any turn fails.
+     */
+    suspend fun run(imagePath: String, turns: List<String>, maxTokens: Int): List<RunOutput>
 
     /** End an in-flight generation; safe to call from another coroutine. */
     suspend fun stop()

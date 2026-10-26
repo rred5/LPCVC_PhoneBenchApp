@@ -3,6 +3,7 @@
     "max_images": 100,
     "max_prompts": 5,
     "max_prompt_chars": 2000,
+    "max_turns": 4,
     "repetitions": [1, 30],
     "rest_seconds": [0, 60],
     "max_edge": [256, 2048],
@@ -24,5 +25,5 @@
     "default_run_seconds": 75,
     "keep_images_after_job": false
   },
-  "min_app_version": "0.2.0"
+  "min_app_version": "0.3.0"
 }

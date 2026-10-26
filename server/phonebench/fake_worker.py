@@ -16,7 +16,7 @@ RESPONSES = {
     "synthetic": "This image looks AI-generated; the textures are too smooth to be a photograph.",
     "tampered": "The image has been tampered with: the object on the left was pasted in.",
 }
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 
 class FakeWorker:
@@ -79,7 +79,22 @@ class FakeWorker:
             "battery_c": 32.0,
             "thermal_status": "none",
             "free_memory_mb": 5000,
+            **self.follow_ups(unit, run, RESPONSES[label]),
         }
+
+    def follow_ups(self, unit: dict, run: dict, first_response: str) -> dict:
+        """Per-turn results for a multi-turn prompt; nothing for a single turn."""
+        prompt = next(item for item in unit["prompts"] if item["prompt_id"] == run["prompt_id"])
+        turns = prompt.get("turns") or [prompt["text"]]
+        if len(turns) < 2:
+            return {}
+        reports = [{"response": first_response, "error": None, "metrics": {"ttft_ms": 900.0, "prompt_tokens": 500, "generated_tokens": 60, "decode_tok_s": 25.0}}]
+        for number in range(2, len(turns) + 1):
+            reports.append(
+                {"response": f'{{"turn": {number}, "boxes": []}}', "error": None,
+                 "metrics": {"ttft_ms": 150.0, "prompt_tokens": 120, "generated_tokens": 10, "decode_tok_s": 25.0}}
+            )
+        return {"turns": reports}
 
     def run_unit(self, unit: dict, stop_after: int | None = None) -> str:
         """Run a unit; return how it finished. `stop_after` simulates Pause after N runs."""

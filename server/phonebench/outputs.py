@@ -3,7 +3,9 @@
 Files:
 
 - `job.json`      — the job, its settings, images and prompts
-- `runs.csv`      — one row per run, harness column names
+- `runs.csv`      — one row per run, harness column names; for a multi-turn
+                    prompt, the response and metrics are the first turn's
+- `turns.csv`     — one row per turn, when the job has a multi-turn prompt
 - `summary.json`  — mean and SD per model, compute unit and prompt
 - `accuracy.json` — scores for labeled images, when the job has any
 - `runs/<run_id>.json` — each run's raw report, when `save_raw_result` is on
@@ -24,10 +26,10 @@ import zipfile
 
 from .config import Config
 from .scoring import score
-from .settings import METRICS
+from .settings import METRICS, turns
 from .store import Store
 
-OUTPUT_FILES = ("job.json", "runs.csv", "summary.json", "accuracy.json", "outputs.zip")
+OUTPUT_FILES = ("job.json", "runs.csv", "turns.csv", "summary.json", "accuracy.json", "outputs.zip")
 STATUS_WORDS = {"completed": "passed", "error": "failed", "cancelled": "cancelled", "pending": "not_run"}
 DEVICE_FIELDS = (
     "load_ms", "warm", "battery_c", "thermal_status", "free_memory_mb",
@@ -96,6 +98,7 @@ def collect(store: Store, job_id: str) -> tuple[dict, list[dict]]:
             "label": image["label"],
             "prompt": prompts[run["prompt_id"]]["position"] + 1,
             "repetition": run["repetition"],
+            "turns": len(turns(settings["run"]["prompts"][prompts[run["prompt_id"]]["position"]])),
             "status": STATUS_WORDS[run["status"]],
             **_metric_values(result, output["metrics"]),
             **{field: result.get(field) for field in DEVICE_FIELDS},
@@ -115,7 +118,7 @@ def collect(store: Store, job_id: str) -> tuple[dict, list[dict]]:
         {key: image[key] for key in ("name", "label", "sha256", "source_sha256", "width", "height", "bytes")}
         for image in images.values()
     ]
-    job["prompts"] = [prompt["text"] for prompt in prompts.values()]
+    job["prompts"] = list(settings["run"]["prompts"])
     return job, rows
 
 
@@ -196,6 +199,37 @@ def accuracy(rows: list[dict]) -> dict | None:
     }
 
 
+TURN_COLUMNS = ("sequence", "run_id", "model", "backend", "image", "label", "prompt", "repetition", "turn", "status")
+
+
+def turn_rows(rows: list[dict], metrics: list[str], save_response: bool) -> list[dict]:
+    """One row per turn of each multi-turn run; a turn the phone never reached has no row."""
+    result = []
+    for row in rows:
+        if row["turns"] < 2:
+            continue
+        for number, turn in enumerate(row["_raw"].get("turns") or [], start=1):
+            result.append(
+                {
+                    **{key: row[key] for key in TURN_COLUMNS if key in row},
+                    "turn": number,
+                    "status": "failed" if turn.get("error") else "passed",
+                    **_metric_values(turn, metrics),
+                    **({"response": turn.get("response")} if save_response else {}),
+                    "error": turn.get("error"),
+                }
+            )
+    return result
+
+
+def _csv_bytes(rows: list[dict], columns: list[str]) -> bytes:
+    text = io.StringIO(newline="")
+    writer = csv.DictWriter(text, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return text.getvalue().encode("utf-8-sig")
+
+
 def _json_bytes(value) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
@@ -208,16 +242,15 @@ def build_files(store: Store, job_id: str) -> dict[str, bytes]:
     if output["save_csv"]:
         scored = any("binary_correct" in row for row in rows)
         columns = [
-            "sequence", "run_id", "model", "backend", "mode", "image", "label", "prompt", "repetition", "status",
+            "sequence", "run_id", "model", "backend", "mode", "image", "label", "prompt", "repetition", "turns", "status",
             *output["metrics"], *DEVICE_FIELDS, "started_utc", "finished_utc", "elapsed_s",
             *(["response"] if output["save_response"] else []), "error",
             *(SCORE_FIELDS if scored else ()),
         ]
-        text = io.StringIO(newline="")
-        writer = csv.DictWriter(text, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-        files["runs.csv"] = text.getvalue().encode("utf-8-sig")
+        files["runs.csv"] = _csv_bytes(rows, columns)
+        if any(row["turns"] > 1 for row in rows):
+            turn_columns = [*TURN_COLUMNS, *output["metrics"], *(["response"] if output["save_response"] else []), "error"]
+            files["turns.csv"] = _csv_bytes(turn_rows(rows, output["metrics"], output["save_response"]), turn_columns)
     if output["save_summary"]:
         files["summary.json"] = _json_bytes(summarize(rows, output["metrics"]))
     scores = accuracy(rows)
