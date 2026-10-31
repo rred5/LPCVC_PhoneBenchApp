@@ -32,6 +32,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 
 /**
@@ -47,6 +48,9 @@ class WorkerService : Service() {
     private var loop: Job? = null
     @Volatile private var pollSeconds = 10
     @Volatile private var downloaded: List<String> = emptyList()
+
+    /** Model id to bundle file name in files/imports/, run between units. */
+    private val pendingImports = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, String>>()
 
     override fun onCreate() {
         super.onCreate()
@@ -92,6 +96,11 @@ class WorkerService : Service() {
                 }
                 return START_NOT_STICKY
             }
+            ACTION_IMPORT -> {
+                val model = intent.getStringExtra(EXTRA_MODEL)
+                val file = intent.getStringExtra(EXTRA_FILE)
+                if (model != null && file != null) pendingImports.add(model to file)
+            }
             else -> settings.enabled = true
         }
         if (loop == null) loop = scope.launch { runLoop() }
@@ -110,6 +119,7 @@ class WorkerService : Service() {
                 delay(5_000)
                 continue
             }
+            runImports()
             val paused = settings.paused
             controls.pauseRequested = paused
             controls.stopRequested = false
@@ -159,6 +169,27 @@ class WorkerService : Service() {
                 continue
             }
             delay(pollSeconds * 1_000L)
+        }
+    }
+
+    /** Install queued bundles; the zip is deleted once the model is registered. */
+    private suspend fun runImports() {
+        while (true) {
+            val (modelId, name) = pendingImports.poll() ?: return
+            val archive = File(File(filesDir, "imports"), name)
+            WorkerStatus.set { it.copy(phase = Phase.DOWNLOADING, message = "Importing $modelId", model = modelId) }
+            try {
+                check(catalog.find(modelId) != null) { "$modelId is not in this app's catalog" }
+                check(archive.isFile) { "No file imports/$name" }
+                engine.importModel(modelId, archive)
+                archive.delete()
+                Log.i(TAG, "PHONEBENCH_IMPORT ok $modelId")
+            } catch (error: Exception) {
+                Log.e(TAG, "PHONEBENCH_IMPORT failed $modelId: ${error.message}", error)
+                WorkerStatus.set { it.copy(lastError = "Import of $modelId failed: ${error.message}") }
+            } finally {
+                WorkerStatus.set { it.copy(model = null) }
+            }
         }
     }
 
@@ -230,6 +261,16 @@ class WorkerService : Service() {
         const val ACTION_RESUME = "com.rred5.phonebench.RESUME"
         const val ACTION_STOP_JOB = "com.rred5.phonebench.STOP_JOB"
         const val ACTION_QUIT = "com.rred5.phonebench.QUIT"
+        private const val ACTION_IMPORT = "com.rred5.phonebench.IMPORT"
+        private const val EXTRA_MODEL = "model"
+        private const val EXTRA_FILE = "file"
+
+        fun requestImport(context: Context, modelId: String, fileName: String) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, WorkerService::class.java).setAction(ACTION_IMPORT).putExtra(EXTRA_MODEL, modelId).putExtra(EXTRA_FILE, fileName),
+            )
+        }
 
         fun send(context: Context, action: String) {
             ContextCompat.startForegroundService(context, Intent(context, WorkerService::class.java).setAction(action))

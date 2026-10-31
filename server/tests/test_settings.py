@@ -86,3 +86,26 @@ def test_comparison_job():
 def test_rejects(overrides, message):
     with pytest.raises(SettingsError, match=message):
         resolve(overrides, CFG)
+
+
+def test_multi_turn_prompts():
+    settings = resolve(run(prompts=["single", ["first {width}x{height}", "second"], ["only one turn"]]), CFG)
+    # A one-turn list is stored as plain text, like a single prompt.
+    assert settings["run"]["prompts"] == ["single", ["first {width}x{height}", "second"], "only one turn"]
+    # Turns share one run: they do not multiply the run count.
+    assert total_runs(settings) == 3 * 10
+
+
+@pytest.mark.parametrize(
+    "prompt, message",
+    [
+        ([], "must not be empty"),
+        (["a", "b", "c", "d", "e"], "at most 4 turns"),
+        (["a", ""], "non-empty text"),
+        (["a", 3], "non-empty text"),
+        (["a", "x" * 2001], "at most 2000 characters"),
+    ],
+)
+def test_bad_multi_turn_prompts(prompt, message):
+    with pytest.raises(SettingsError, match=message):
+        resolve(run(prompts=[prompt]), CFG)

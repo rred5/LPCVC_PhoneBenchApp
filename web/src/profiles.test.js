@@ -459,3 +459,24 @@ test("summarize gives one line using display names", () => {
   assert.match(summarize(settings({ repetitions: 1, prompts: ["a"] })), /1 repetition · .* 1 prompt$/);
   assert.match(summarize(settings({ models: [], backends: [] })), /^no models · no compute units/);
 });
+
+test("multi-turn prompts are kept, tidied and compared by their turns", () => {
+  const two = ["  Real or tampered?  ", "Box it in {width}x{height}.", "  "];
+  const stored = pickSettings(settings({ prompts: ["plain", two, ["only", ""], ["", " "]] }));
+  assert.deepEqual(stored.prompts, ["plain", ["Real or tampered?", "Box it in {width}x{height}."], "only"]);
+  assert.equal(sameSettings(stored, { ...stored, prompts: [["Real or tampered?", "Box it in {width}x{height}."], "plain", "only"] }), true);
+  assert.equal(sameSettings(stored, { ...stored, prompts: ["plain", ["Real or tampered?"], "only"] }), false);
+  assert.match(summarize(stored), /3 prompts$/);
+});
+
+test("cleanSettings caps turns and turn length", () => {
+  const cleaned = cleanSettings({ ...settings(), prompts: [["a", "b", "c", "d", "e"], ["x".repeat(30), 5]] }, { ...options, limits: { ...options.limits, max_turns: 3 } });
+  assert.deepEqual(cleaned.prompts, [["a", "b", "c"], "x".repeat(20)]);
+});
+
+test("a stored profile with multi-turn prompts survives a reload", () => {
+  const storage = new MemoryStorage();
+  const saved = addProfile(storage, "a@b.c", "Two stage", settings({ prompts: [["one", "two"]] }));
+  assert.equal(saved.ok, true);
+  assert.deepEqual(readState(storage, "a@b.c").profiles[0].settings.prompts, [["one", "two"]]);
+});

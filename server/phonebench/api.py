@@ -95,6 +95,12 @@ class Metrics(_Body):
     stop_reason: str | None = None
 
 
+class TurnReport(_Body):
+    response: str | None = Field(default=None, max_length=200_000)
+    error: str | None = Field(default=None, max_length=5_000)
+    metrics: Metrics | None = None
+
+
 class RunReport(_Body):
     unit_id: str
     status: Literal["completed", "error"]
@@ -103,6 +109,8 @@ class RunReport(_Body):
     response: str | None = Field(default=None, max_length=200_000)
     error: str | None = Field(default=None, max_length=5_000)
     metrics: Metrics | None = None
+    # Every turn of a multi-turn prompt, in order; response and metrics above are the first turn's.
+    turns: list[TurnReport] | None = Field(default=None, max_length=20)
     load_ms: float | None = None
     warm: bool | None = None
     framework: str | None = None
@@ -324,7 +332,7 @@ def create_app(cfg: Config, clock=time.time, store=None, storage=None, auth=None
             "limits": {
                 key: limits[key]
                 for key in (
-                    "max_images", "max_prompts", "max_prompt_chars", "repetitions", "rest_seconds", "max_edge",
+                    "max_images", "max_prompts", "max_prompt_chars", "max_turns", "repetitions", "rest_seconds", "max_edge",
                     "max_tokens", "max_upload_bytes", "max_upload_edge", "max_unfinished_uploads", "max_runs_per_job",
                     "max_queued_jobs_per_user",
                 )

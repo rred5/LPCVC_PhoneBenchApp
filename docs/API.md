@@ -15,7 +15,8 @@ them. See [DESIGN.md](DESIGN.md) for the why.
   compute unit**, with an ordered list of runs. Keeping a unit to one model
   and one compute unit lets warm mode load once and do one warm-up.
 - **Run** — one image + one prompt + one repetition. The phone reports each
-  run as soon as it finishes.
+  run as soon as it finishes. A prompt can have several **turns**, asked in
+  order in one conversation about the image; they are one run.
 
 The server splits a job into units in the order the job lists models and
 compute units. Within a unit, runs go image by image, then prompt, then
@@ -27,10 +28,9 @@ repetition.
 - JSON bodies, UTF-8. Times are ISO 8601 in UTC (`2026-10-01T18:04:05Z`).
 - IDs are opaque strings chosen by the server (`j_…`, `u_…`, `r_…`, `img_…`,
   `p_…`). The phone never builds IDs or URLs itself.
-- The phone sends `PhoneBench-App-Version: 0.2.0` on every request. If the
-  app is older than `min_app_version` in `config/server.json` (now 0.2.0, the
-  first version that follows the image redirect below), the server answers
-  `426`.
+- The phone sends `PhoneBench-App-Version: 0.3.0` on every request. If the
+  app is older than `min_app_version` in `config/server.json` (now 0.3.0, the
+  first version that runs multi-turn prompts), the server answers `426`.
 - Errors look like `{"error": {"code": "lease_lost", "message": "…"}}`.
 
 ## Authentication
@@ -60,9 +60,9 @@ Request:
 {
   "state": "idle",
   "unit_id": null,
-  "app_version": "0.2.0",
+  "app_version": "0.3.0",
   "framework": "geniex",
-  "framework_version": "0.3.5",
+  "framework_version": "0.8.0",
   "models_downloaded": ["Qwen3-VL-2B-Instruct-GGUF"],
   "battery_c": 31.5,
   "thermal_status": "none",
@@ -112,7 +112,11 @@ A unit:
     {"image_id": "img_01", "url": "/api/v1/device/images/img_01", "sha256": "9b1e…", "bytes": 348003}
   ],
   "prompts": [
-    {"prompt_id": "p_01", "text": "Can you identify if this image is real, full synthetic, or tampered? …"}
+    {"prompt_id": "p_01", "text": "Can you identify if this image is real, full synthetic, or tampered? …",
+     "turns": ["Can you identify if this image is real, full synthetic, or tampered? …"]},
+    {"prompt_id": "p_02", "text": "Decide if this image is real, tampered, or fully_fake …",
+     "turns": ["Decide if this image is real, tampered, or fully_fake …",
+               "Now locate every tampered object … This image is {width} pixels wide and {height} pixels tall …"]}
   ],
   "runs": [
     {"run_id": "r_0001", "image_id": "img_01", "prompt_id": "p_01", "repetition": 1},
@@ -122,6 +126,10 @@ A unit:
 ```
 
 - `model` is an `id` from the app's model catalog.
+- `turns` is every turn of the prompt, in order (one for most prompts);
+  `text` is the first turn, for apps before 0.3.0. The phone replaces
+  `{width}` and `{height}` in each turn with the downloaded image's size,
+  and nothing else (prompts often contain JSON braces).
 - `runs` lists only the runs still to do. A unit that resumes after an
   interruption simply has fewer runs.
 
@@ -162,7 +170,7 @@ Sent once per run, right after it finishes.
   "load_ms": null,
   "warm": true,
   "framework": "geniex",
-  "framework_version": "0.3.5",
+  "framework_version": "0.8.0",
   "runtime": "llama_cpp",
   "compute_unit": "NPU",
   "battery_c": 33.0,
@@ -172,6 +180,10 @@ Sent once per run, right after it finishes.
 ```
 
 - `status`: `completed` or `error` (with `error` set and `metrics` null).
+- For a prompt with several turns, `response` and `metrics` are the first
+  turn's, and `turns` lists every turn in order as
+  `{"response", "error", "metrics"}`. Single-turn runs send `turns: null`.
+  A turn that fails fails the whole run.
 - `load_ms`: set on the run that loaded the model (every run in cold mode,
   the first in warm mode), else `null`.
 - The server computes `reported_total_tokens` and scoring; the phone sends
@@ -221,6 +233,9 @@ stays `paused`).
 - Warm mode: load the model, do one warm-up run with the first run's image
   and prompt (not reported), then for each run: reset the context, run,
   report, rest `rest_seconds` (not after the last run).
+- A run with several turns is one conversation: the image goes with the
+  first turn, each later turn is added to the same chat history without a
+  reset. `max_tokens` applies to each turn, `run_timeout_s` to the whole run.
 - Cold mode: for each run: load, run, unload, report, rest.
 - A run that exceeds `run_timeout_s` is stopped and reported as an error.
 - If the model is not downloaded, download it first with `state:
@@ -231,8 +246,8 @@ stays `paused`).
 
 - the model is a vision model in the app's catalog, and `backend` is allowed
   for it;
-- `repetitions`, `rest_seconds`, `max_tokens`, image and prompt counts are
-  within the limits in DESIGN.md;
+- `repetitions`, `rest_seconds`, `max_tokens`, image and prompt counts, and
+  turns per prompt (at most 4), are within the limits in DESIGN.md;
 - every image URL is a path on the API server (the phone never asks anywhere
   else; the only other host it contacts is the one https redirect above), its
   SHA-256 matches, and it decodes as a PNG of at most 4096 px.

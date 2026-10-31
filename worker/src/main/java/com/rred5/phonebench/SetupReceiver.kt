@@ -12,6 +12,12 @@ import android.util.Log
  *
  *     adb shell am broadcast -n com.rred5.phonebench/.SetupReceiver \
  *         --es server_url http://127.0.0.1:8000 --es device_key pbd_...
+ *
+ * It also installs a model bundle pushed into the app's files/imports/ (for
+ * bundles too large for the SDK's in-memory download); the worker runs the
+ * import between units and logs PHONEBENCH_IMPORT:
+ *
+ *     adb shell am broadcast -n com.rred5.phonebench/.SetupReceiver  *         --es import_model Gemma-4-E4B-it --es import_file gemma.zip
  */
 class SetupReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -27,6 +33,17 @@ class SetupReceiver : BroadcastReceiver() {
         }
         intent.getStringExtra("device_key")?.let { key ->
             if (key.startsWith("pbd_") && key.length in 20..200) settings.deviceKey = key else notes += "device_key rejected"
+        }
+        val importModel = intent.getStringExtra("import_model")
+        val importFile = intent.getStringExtra("import_file")
+        if (importModel != null || importFile != null) {
+            // A bare file name keeps the import inside files/imports/.
+            if (importModel != null && importFile != null && importFile.matches(Regex("[A-Za-z0-9._-]+")) && importFile != "." && importFile != "..") {
+                WorkerService.requestImport(context, importModel, importFile)
+                notes += "import of $importModel queued"
+            } else {
+                notes += "import rejected: give import_model and a bare import_file name"
+            }
         }
         val summary = "server=${settings.serverUrl ?: "missing"} key=${if (settings.deviceKey != null) "set" else "missing"}"
         Log.i(TAG, "PHONEBENCH_SETUP $summary ${notes.joinToString("; ")}")

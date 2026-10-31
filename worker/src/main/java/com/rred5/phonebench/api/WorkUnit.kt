@@ -7,7 +7,10 @@ import org.json.JSONObject
 
 data class UnitImage(val imageId: String, val url: String, val sha256: String, val bytes: Long)
 
-data class UnitPrompt(val promptId: String, val text: String)
+/** A prompt's turns, asked in order in one conversation; most prompts have one. */
+data class UnitPrompt(val promptId: String, val turns: List<String>) {
+    val text get() = turns.first()
+}
 
 data class UnitRun(val runId: String, val imageId: String, val promptId: String, val repetition: Int)
 
@@ -51,7 +54,11 @@ data class WorkUnit(
                 images = json.getJSONArray("images").objects().map {
                     UnitImage(it.getString("image_id"), it.getString("url"), it.getString("sha256"), it.getLong("bytes"))
                 },
-                prompts = json.getJSONArray("prompts").objects().map { UnitPrompt(it.getString("prompt_id"), it.getString("text")) },
+                prompts = json.getJSONArray("prompts").objects().map { prompt ->
+                    // Servers before multi-turn prompts send only text.
+                    val turns = prompt.optJSONArray("turns")?.let { list -> (0 until list.length()).map { list.getString(it) } }
+                    UnitPrompt(prompt.getString("prompt_id"), turns?.takeIf { it.isNotEmpty() } ?: listOf(prompt.getString("text")))
+                },
                 runs = json.getJSONArray("runs").objects().map {
                     UnitRun(it.getString("run_id"), it.getString("image_id"), it.getString("prompt_id"), it.getInt("repetition"))
                 },
@@ -66,6 +73,7 @@ object UnitChecks {
     const val MAX_IMAGES = 100
     const val MAX_PROMPTS = 5
     const val MAX_PROMPT_CHARS = 2_000
+    const val MAX_TURNS = 4
     const val MAX_RUNS = 500
     const val MAX_REST_SECONDS = 60.0
     const val MAX_TOKENS = 4_096
@@ -84,7 +92,8 @@ object UnitChecks {
         if (unit.runs.isEmpty() || unit.runs.size > MAX_RUNS) return "A unit needs 1-$MAX_RUNS runs"
         if (unit.images.isEmpty() || unit.images.size > MAX_IMAGES) return "A unit needs 1-$MAX_IMAGES images"
         if (unit.prompts.isEmpty() || unit.prompts.size > MAX_PROMPTS) return "A unit needs 1-$MAX_PROMPTS prompts"
-        if (unit.prompts.any { it.text.isBlank() || it.text.length > MAX_PROMPT_CHARS }) return "A prompt is empty or too long"
+        if (unit.prompts.any { it.turns.size > MAX_TURNS }) return "A prompt has more than $MAX_TURNS turns"
+        if (unit.prompts.any { prompt -> prompt.turns.any { it.isBlank() || it.length > MAX_PROMPT_CHARS } }) return "A prompt is empty or too long"
         if (unit.restSeconds !in 0.0..MAX_REST_SECONDS) return "rest_seconds is out of range"
         if (unit.maxTokens !in 1..MAX_TOKENS) return "max_tokens is out of range"
         if (unit.runTimeoutS !in 1..MAX_RUN_TIMEOUT_S) return "run_timeout_s is out of range"

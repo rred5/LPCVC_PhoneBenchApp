@@ -272,3 +272,37 @@ def test_outputs_while_running(env):
     assert summary[0]["passed"] == 1
     job_json = json.loads(env.client.get(f"/api/v1/jobs/{job['job_id']}/outputs/job.json").content)
     assert job_json["status"] == "running" and len(job_json["images"]) == 2
+
+
+def test_multi_turn_prompt(env):
+    upload = env.upload({"set/real/a.png": image_bytes(), "set/tampered/b.png": image_bytes(color=(10, 10, 200))})
+    images = [item["upload_id"] for item in upload["accepted"]]
+    turns = ["Real or tampered?", "Box it in this {width}x{height} image."]
+    response = env.client.post("/api/v1/jobs", json={"name": "two stage", "settings": {"run": {"images": images, "prompts": ["plain", turns], "repetitions": 1}}})
+    assert response.status_code == 201, response.text
+    job_id = response.json()["job_id"]
+    assert response.json()["runs"]["total"] == 4
+
+    worker = env.worker()
+    unit = worker.take_unit()
+    # Every prompt lists its turns; text stays the first turn for older apps.
+    assert [(prompt["text"], prompt["turns"]) for prompt in unit["prompts"]] == [("plain", ["plain"]), (turns[0], turns)]
+    worker.run_unit(unit)
+
+    job = env.client.get(f"/api/v1/jobs/{job_id}/outputs/job.json").json()
+    assert job["prompts"] == ["plain", turns]
+    read = lambda name: list(csv.DictReader(io.StringIO(env.client.get(f"/api/v1/jobs/{job_id}/outputs/{name}").content.decode("utf-8-sig"))))
+    runs = read("runs.csv")
+    assert sorted(row["turns"] for row in runs) == ["1", "1", "2", "2"]
+    # runs.csv keeps the first turn, so verdict scoring still reads stage 1.
+    multi = [row for row in runs if row["turns"] == "2"]
+    assert all(row["binary_correct"] in ("True", "False") for row in multi)
+    rows = read("turns.csv")
+    assert [(row["image"], row["turn"]) for row in rows] == [(row["image"], str(t)) for row in multi for t in (1, 2)]
+    assert rows[1]["response"] == '{"turn": 2, "boxes": []}' and rows[1]["ttft_ms"] == "150.0"
+
+
+def test_single_turn_job_has_no_turns_csv(env):
+    job = env.submit().json()
+    env.worker().run_until_idle()
+    assert env.client.get(f"/api/v1/jobs/{job['job_id']}/outputs/turns.csv").status_code == 404

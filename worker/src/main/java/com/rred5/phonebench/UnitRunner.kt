@@ -7,6 +7,7 @@ import android.util.Log
 import com.rred5.phonebench.api.ApiClient
 import com.rred5.phonebench.api.ApiException
 import com.rred5.phonebench.api.UnitChecks
+import com.rred5.phonebench.api.UnitPrompt
 import com.rred5.phonebench.api.WorkUnit
 import com.rred5.phonebench.inference.Backend
 import com.rred5.phonebench.inference.InferenceEngine
@@ -39,6 +40,9 @@ class Controls {
 }
 
 private class LeaseLostException : Exception("The server reassigned this unit")
+
+/** A downloaded, checked image and its size, for the {width} and {height} prompt placeholders. */
+private class UnitImageFile(val file: File, val width: Int, val height: Int)
 
 /** Runs one unit end to end (docs/API.md, "Phone behavior"). */
 class UnitRunner(
@@ -104,9 +108,9 @@ class UnitRunner(
         }
     }
 
-    private suspend fun execute(unit: WorkUnit, images: Map<String, File>) {
+    private suspend fun execute(unit: WorkUnit, images: Map<String, UnitImageFile>) {
         val backend = Backend.valueOf(unit.backend)
-        val prompts = unit.prompts.associate { it.promptId to it.text }
+        val prompts = unit.prompts.associateBy { it.promptId }
         var runtime = ""
         var pendingLoadMs: Long? = null
 
@@ -132,10 +136,10 @@ class UnitRunner(
                 engine.load(unit.model, backend).also { runtime = it.runtime; pendingLoadMs = it.loadMs }
             }
             val started = Instant.now()
-            var output: RunOutput? = null
+            var outputs: List<RunOutput>? = null
             var failure: String? = null
             try {
-                output = generate(unit, images.getValue(run.imageId), prompts.getValue(run.promptId))
+                outputs = generate(unit, images.getValue(run.imageId), prompts.getValue(run.promptId))
             } catch (error: CancellationException) {
                 throw error
             } catch (error: RunTimeoutException) {
@@ -149,6 +153,8 @@ class UnitRunner(
             signal()?.let { return finish(unit, it) }
 
             val stats = DeviceStats.read(context)
+            // The run's response and metrics are the first turn's; every turn is in "turns".
+            val output = outputs?.first()
             val report =
                 JSONObject()
                     .put("unit_id", unit.unitId)
@@ -158,6 +164,7 @@ class UnitRunner(
                     .put("response", output?.response ?: JSONObject.NULL)
                     .put("error", failure ?: JSONObject.NULL)
                     .put("metrics", output?.let(::metrics) ?: JSONObject.NULL)
+                    .put("turns", outputs?.takeIf { it.size > 1 }?.let(::turnReports) ?: JSONObject.NULL)
                     .put("load_ms", pendingLoadMs ?: JSONObject.NULL)
                     .put("warm", unit.isWarm)
                     .put("framework", engine.framework)
@@ -178,9 +185,11 @@ class UnitRunner(
 
     private class RunTimeoutException(seconds: Int) : Exception("Run exceeded $seconds s")
 
-    private suspend fun generate(unit: WorkUnit, image: File, prompt: String): RunOutput =
+    private suspend fun generate(unit: WorkUnit, image: UnitImageFile, prompt: UnitPrompt): List<RunOutput> =
         try {
-            withTimeout(unit.runTimeoutS * 1000L) { engine.run(image.absolutePath, prompt, unit.maxTokens) }
+            // Not String.format: prompts often contain JSON braces.
+            val turns = prompt.turns.map { it.replace("{width}", "${image.width}").replace("{height}", "${image.height}") }
+            withTimeout(unit.runTimeoutS * 1000L) { engine.run(image.file.absolutePath, turns, unit.maxTokens) }
         } catch (error: TimeoutCancellationException) {
             engine.stop()
             throw RunTimeoutException(unit.runTimeoutS)
@@ -211,7 +220,7 @@ class UnitRunner(
         WorkerStatus.set { it.copy(phase = Phase.RUNNING, downloadPercent = null) }
     }
 
-    private suspend fun downloadImages(unit: WorkUnit, dir: File): Map<String, File> {
+    private suspend fun downloadImages(unit: WorkUnit, dir: File): Map<String, UnitImageFile> {
         status("Downloading ${unit.images.size} image(s)")
         dir.mkdirs()
         return unit.images.associate { image ->
@@ -223,7 +232,7 @@ class UnitRunner(
             check(bounds.outMimeType == "image/png" && maxOf(bounds.outWidth, bounds.outHeight) in 1..UnitChecks.MAX_IMAGE_EDGE) {
                 "Image ${image.imageId} is not a PNG within ${UnitChecks.MAX_IMAGE_EDGE} px"
             }
-            image.imageId to file
+            image.imageId to UnitImageFile(file, bounds.outWidth, bounds.outHeight)
         }
     }
 
@@ -292,6 +301,9 @@ class UnitRunner(
             .put("prefill_tok_s", finite(output.prefillTokS))
             .put("decode_tok_s", finite(output.decodeTokS))
             .put("stop_reason", output.stopReason)
+
+    private fun turnReports(outputs: List<RunOutput>) =
+        org.json.JSONArray(outputs.map { JSONObject().put("response", it.response).put("error", JSONObject.NULL).put("metrics", metrics(it)) })
 
     private fun finite(value: Double): Any = if (value.isFinite()) value else JSONObject.NULL
 

@@ -11,6 +11,7 @@ import json
 import statistics
 
 from .config import Config
+from .settings import turns
 from .store import new_id
 
 TERMINAL_JOB = ("done", "failed", "cancelled")
@@ -50,7 +51,9 @@ def insert_job(db, job_id: str, name: str, submitted_by: str, settings: dict, im
             ),
         )
     prompt_ids = []
-    for position, text in enumerate(settings["run"]["prompts"]):
+    for position, prompt in enumerate(settings["run"]["prompts"]):
+        # The table keeps the first turn; the follow-ups come from the job's settings.
+        text = turns(prompt)[0]
         prompt_ids.append(new_id("p"))
         db.execute(
             "INSERT INTO prompts (prompt_id, job_id, position, text) VALUES (?, ?, ?, ?)",
@@ -136,10 +139,12 @@ def estimate_seconds(db, cfg: Config, settings: dict) -> float:
         durations.setdefault((row["model"], row["backend"]), []).append((finished - started).total_seconds())
     run = settings["run"]
     per_unit_runs = len(run["images"]) * len(run["prompts"]) * run["repetitions"]
+    # Without history, count a follow-up turn as half a run: it reuses the image and is usually short.
+    turn_factor = sum(1 + 0.5 * (len(turns(prompt)) - 1) for prompt in run["prompts"]) / len(run["prompts"])
     total = 0.0
     for model, backend in product(run["models"], run["backends"]):
         seen = durations.get((model, backend))
-        run_s = statistics.mean(seen) if seen else cfg.queue["default_run_seconds"]
+        run_s = statistics.mean(seen) if seen else cfg.queue["default_run_seconds"] * turn_factor
         # Warm mode adds one warm-up run per unit; cold mode reloads each run.
         runs = per_unit_runs + 1 if run["mode"] == "warm" else per_unit_runs * 1.2
         total += runs * run_s + max(0, per_unit_runs - 1) * run["rest_seconds"]
@@ -264,7 +269,14 @@ def unit_payload(db, cfg: Config, unit_id: str) -> dict:
             }
             for image_id in image_ids
         ],
-        "prompts": [{"prompt_id": prompt_id, "text": prompts[prompt_id]["text"]} for prompt_id in prompt_ids],
+        "prompts": [
+            {
+                "prompt_id": prompt_id,
+                "text": prompts[prompt_id]["text"],
+                "turns": turns(run_settings["prompts"][prompts[prompt_id]["position"]]),
+            }
+            for prompt_id in prompt_ids
+        ],
         "runs": [
             {"run_id": run["run_id"], "image_id": run["image_id"], "prompt_id": run["prompt_id"], "repetition": run["repetition"]}
             for run in runs

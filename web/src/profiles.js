@@ -6,6 +6,9 @@
 // A profile holds the eight settings the job form can carry between jobs
 // (models, backends, prompts, mode, repetitions, restSeconds, maxTokens,
 // maxEdge). The job name and the images belong to one job and are never saved.
+// A prompt is text or a list of turns (see prompts.js).
+
+import { DEFAULT_MAX_TURNS, isPromptShape, tidyPrompt, tidyPrompts, turnsOf } from "./prompts.js";
 
 export const BACKENDS = ["CPU", "GPU", "NPU"];
 export const DEFAULT_ID = "default";
@@ -115,7 +118,7 @@ export function pickSettings(source) {
   return {
     models: [...source.models],
     backends: [...source.backends],
-    prompts: source.prompts.map((prompt) => prompt.trim()).filter(Boolean),
+    prompts: tidyPrompts(source.prompts),
     mode: source.mode,
     repetitions: source.repetitions,
     restSeconds: source.restSeconds,
@@ -131,7 +134,7 @@ export function defaultSettings(defaults) {
   return {
     models: [...run.models],
     backends: [...run.backends],
-    prompts: [...run.prompts],
+    prompts: run.prompts.map((prompt) => (Array.isArray(prompt) ? [...prompt] : prompt)),
     mode: run.mode.toLowerCase(),
     repetitions: run.repetitions,
     restSeconds: run.rest_seconds,
@@ -160,10 +163,17 @@ export function cleanSettings(saved, { defaults, limits, models }) {
   const chosen = Array.isArray(saved?.models) ? unique(saved.models).filter((id) => catalog.has(id)) : fallback.models;
   const runnable = BACKENDS.filter((backend) => chosen.every((id) => catalog.get(id)?.backends.includes(backend) ?? true));
   const backends = Array.isArray(saved?.backends) ? unique(saved.backends).filter((backend) => runnable.includes(backend)) : fallback.backends;
+  const maxTurns = limits.max_turns ?? DEFAULT_MAX_TURNS;
   const prompts = (Array.isArray(saved?.prompts) ? saved.prompts : fallback.prompts)
-    .filter((prompt) => typeof prompt === "string")
-    .map((prompt) => prompt.trim().slice(0, limits.max_prompt_chars))
-    .filter(Boolean)
+    .map((prompt) =>
+      tidyPrompt(
+        turnsOf(prompt)
+          .filter((turn) => typeof turn === "string")
+          .slice(0, maxTurns)
+          .map((turn) => turn.trim().slice(0, limits.max_prompt_chars)),
+      ),
+    )
+    .filter((prompt) => prompt !== null)
     .slice(0, limits.max_prompts);
   return {
     models: chosen,
@@ -186,7 +196,7 @@ export function sameSettings(a, b) {
 // One line describing a profile's settings, for the list of profiles.
 export function summarize(settings, models = []) {
   const names = new Map(models.map((model) => [model.id, model.display_name]));
-  const prompts = settings.prompts.filter((prompt) => prompt.trim()).length;
+  const prompts = tidyPrompts(settings.prompts).length;
   return [
     settings.models.map((id) => names.get(id) ?? id).join(", ") || "no models",
     settings.backends.join(", ") || "no compute units",
@@ -203,7 +213,7 @@ function comparable(settings) {
   return {
     models: [...settings.models].sort(),
     backends: [...settings.backends].sort(),
-    prompts: settings.prompts.map((prompt) => prompt.trim()).filter(Boolean).sort(),
+    prompts: tidyPrompts(settings.prompts).map((prompt) => JSON.stringify(prompt)).sort(),
     mode: settings.mode,
     repetitions: Number(settings.repetitions),
     restSeconds: Number(settings.restSeconds),
@@ -236,13 +246,13 @@ function storedSettings(raw) {
   if (!isObject(raw)) return null;
   const models = stringList(raw.models);
   const backends = stringList(raw.backends);
-  const prompts = stringList(raw.prompts);
+  const prompts = Array.isArray(raw.prompts) && raw.prompts.length <= MAX_LIST && raw.prompts.every((prompt) => isPromptShape(prompt, MAX_TEXT)) ? raw.prompts : null;
   if (!models || !backends || !prompts || !MODES.includes(raw.mode)) return null;
   if (!NUMBER_KEYS.every((key) => Number.isFinite(raw[key]))) return null;
   return {
     models: unique(models),
     backends: unique(backends).filter((backend) => BACKENDS.includes(backend)),
-    prompts: prompts.map((prompt) => prompt.trim()).filter(Boolean),
+    prompts: tidyPrompts(prompts),
     mode: raw.mode,
     repetitions: Math.round(raw.repetitions),
     restSeconds: Math.round(raw.restSeconds),

@@ -4,6 +4,7 @@ import FileTree from "./FileTree.jsx";
 import { buildTree, chosenLabel, describeCounts, isWithin, pruneTags, withTag } from "./fileTree.js";
 import { ProfileBar, useProfiles } from "./Profiles.jsx";
 import { BACKENDS, cleanSettings, resolveProfile } from "./profiles.js";
+import { DEFAULT_MAX_TURNS, tidyPrompts, turnsOf } from "./prompts.js";
 import { filePath, isImage, uploadImages } from "./upload.js";
 
 const JOB_NAME = /^[\w .()-]{1,80}$/;
@@ -78,7 +79,11 @@ export default function NewJob({ user, onSubmitted }) {
   };
   const tag = (key, value) => setTags(withTag(tags, key, value));
   const tooBig = files.filter((file) => file.size > limits.max_upload_bytes);
-  const prompts = form.prompts.map((prompt) => prompt.trim()).filter(Boolean);
+  const prompts = tidyPrompts(form.prompts);
+  const maxTurns = limits.max_turns ?? DEFAULT_MAX_TURNS;
+  // Replace prompt `index`'s turns; a prompt left with one turn goes back to plain text.
+  const setTurns = (index, turns) =>
+    set("prompts", form.prompts.map((item, i) => (i === index ? (turns.length === 1 ? turns[0] : turns) : item)));
   const runs = form.models.length * form.backends.length * files.length * prompts.length * form.repetitions;
 
   const problems = [];
@@ -214,21 +219,39 @@ export default function NewJob({ user, onSubmitted }) {
 
           <fieldset className="wide">
             <legend>Prompts</legend>
-            {form.prompts.map((prompt, index) => (
-              <div key={index} className="prompt">
-                <textarea
-                  rows={2}
-                  value={prompt}
-                  maxLength={limits.max_prompt_chars}
-                  onChange={(e) => set("prompts", form.prompts.map((item, i) => (i === index ? e.target.value : item)))}
-                />
-                {form.prompts.length > 1 && (
-                  <button type="button" className="link" onClick={() => set("prompts", form.prompts.filter((_, i) => i !== index))}>
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
+            {form.prompts.map((prompt, index) => {
+              const turns = turnsOf(prompt);
+              return (
+                <div key={index} className="prompt-group">
+                  {turns.map((turn, number) => (
+                    <div key={number} className="prompt">
+                      {turns.length > 1 && <span className="small muted">Turn {number + 1}</span>}
+                      <textarea
+                        rows={2}
+                        value={turn}
+                        maxLength={limits.max_prompt_chars}
+                        onChange={(e) => setTurns(index, turns.map((item, t) => (t === number ? e.target.value : item)))}
+                      />
+                      {number > 0 && (
+                        <button type="button" className="link" onClick={() => setTurns(index, turns.filter((_, t) => t !== number))}>
+                          Remove turn
+                        </button>
+                      )}
+                      {number === 0 && form.prompts.length > 1 && (
+                        <button type="button" className="link" onClick={() => set("prompts", form.prompts.filter((_, i) => i !== index))}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {turns.length < maxTurns && (
+                    <button type="button" className="link small" onClick={() => setTurns(index, [...turns, ""])}>
+                      + Add a follow-up turn (same conversation; {"{width}"} and {"{height}"} become the image size)
+                    </button>
+                  )}
+                </div>
+              );
+            })}
             {form.prompts.length < limits.max_prompts && (
               <button type="button" className="link" onClick={() => set("prompts", [...form.prompts, ""])}>
                 + Add a prompt to compare

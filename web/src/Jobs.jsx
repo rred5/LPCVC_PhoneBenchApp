@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, download } from "./api.js";
 import { usePolling } from "./usePolling.js";
+import { isMultiTurn } from "./prompts.js";
 
 const ACTIVE = ["queued", "running"];
 
@@ -133,6 +134,7 @@ function JobDetail({ jobId, active }) {
       <div className="row">
         <span className="muted small">Download:</span>
         <button className="link" onClick={() => save("runs.csv")}>runs.csv</button>
+        {run.prompts.some(isMultiTurn) && <button className="link" onClick={() => save("turns.csv")}>turns.csv</button>}
         <button className="link" onClick={() => save("summary.json")}>summary.json</button>
         {labeled && <button className="link" onClick={() => save("accuracy.json")}>accuracy.json</button>}
         <button className="link" onClick={() => save("outputs.zip")}>everything (.zip)</button>

@@ -2,6 +2,7 @@ package com.rred5.phonebench.inference
 
 import android.content.Context
 import android.os.SystemClock
+import android.system.Os
 import android.util.Log
 import com.geniex.sdk.GenieXSdk
 import com.geniex.sdk.ModelManagerWrapper
@@ -37,6 +38,9 @@ class GenieXEngine(
         private set
 
     init {
+        // Without this the SDK pulls AI Hub's latest release, whose bundles can need a newer
+        // QAIRT than the SDK ships. Set before init, which loads the native library.
+        Os.setenv("GENIEX_AIHUBVERSION", AIHUB_RELEASE, true)
         // Idempotent: the SDK guards its own plugin registration.
         GenieXSdk.getInstance().init(context.applicationContext)
     }
@@ -72,6 +76,25 @@ class GenieXEngine(
         checkNotNull(ModelManagerWrapper.getPaths(model.modelName)) { "Download of $modelId did not complete" }
     }
 
+    override suspend fun importModel(modelId: String, archive: File) {
+        val model = model(modelId)
+        if (ModelManagerWrapper.getPaths(model.modelName) != null) ModelManagerWrapper.remove(model.modelName)
+        var failure: String? = null
+        val input =
+            ModelPullInput(
+                model_name = model.modelName,
+                precision = model.quant,
+                hub = HubSource.LOCALFS,
+                local_path = archive.absolutePath,
+                chipset = model.chipset,
+            )
+        ModelManagerWrapper.pullFlow(input).collect { event ->
+            if (event is ModelManagerWrapper.PullEvent.Error) failure = "Import failed (${event.code}): ${event.message}"
+        }
+        failure?.let { error(it) }
+        checkNotNull(ModelManagerWrapper.getPaths(model.modelName)) { "Import of $modelId did not register the model" }
+    }
+
     override suspend fun load(modelId: String, backend: Backend): LoadResult {
         val model = model(modelId)
         require(backend in model.backends) { "$modelId does not run on $backend" }
@@ -84,7 +107,7 @@ class GenieXEngine(
         val config =
             if (runtime == "qairt") {
                 // QAIRT rejects non-zero n_ctx / n_gpu_layers; both are fixed in the bundle.
-                ModelConfig(nCtx = 0, nGpuLayers = 0, nThreads = 8, enable_thinking = false)
+                ModelConfig(nCtx = 0, nGpuLayers = 0, nThreads = 8)
             } else {
                 ModelConfig(
                     nCtx = vlmContextSize(vision),
@@ -92,7 +115,6 @@ class GenieXEngine(
                     nBatch = 1,
                     nUBatch = 1,
                     nGpuLayers = if (backend == Backend.CPU) 0 else 999,
-                    enable_thinking = false,
                 )
             }
         val computeUnit =
@@ -107,7 +129,6 @@ class GenieXEngine(
                 .builder()
                 .vlmCreateInput(
                     VlmCreateInput(
-                        model_name = paths.model_name,
                         model_path = paths.model_path,
                         mmproj_path = paths.mmproj_path,
                         config = config,
@@ -127,11 +148,25 @@ class GenieXEngine(
         check(code == 0) { "Context reset failed with code $code" }
     }
 
-    override suspend fun run(imagePath: String, prompt: String, maxTokens: Int): RunOutput {
+    override suspend fun run(imagePath: String, turns: List<String>, maxTokens: Int): List<RunOutput> {
         val vlm = checkNotNull(wrapper) { "No model loaded" }
-        // Same content order as the demo app: image first, then text.
-        val message = VlmChatMessage(role = "user", contents = listOf(VlmContent("image", imagePath), VlmContent("text", prompt)))
-        val template = vlm.applyChatTemplate(arrayOf(message), null, false).getOrThrow()
+        // Follow-up turns continue the conversation as the demo app's chat does: the template
+        // covers the whole history, and the assistant's replies are part of it.
+        val history = mutableListOf<VlmChatMessage>()
+        return turns.mapIndexed { index, text ->
+            // Same content order as the demo app: image first, then text. Only the first turn has the image.
+            val contents = if (index == 0) listOf(VlmContent("image", imagePath), VlmContent("text", text)) else listOf(VlmContent("text", text))
+            val message = VlmChatMessage(role = "user", contents = contents)
+            history += message
+            val output = generate(vlm, history, message, maxTokens)
+            history += VlmChatMessage(role = "assistant", contents = listOf(VlmContent("text", output.response)))
+            output
+        }
+    }
+
+    private suspend fun generate(vlm: VlmWrapper, history: List<VlmChatMessage>, message: VlmChatMessage, maxTokens: Int): RunOutput {
+        val template = vlm.applyChatTemplate(history.toTypedArray(), null, false).getOrThrow()
+        // Only the new message's media: the SDK tokenizes the conversation incrementally.
         val config =
             vlm.injectMediaPathsToConfig(
                 arrayOf(message),
@@ -139,7 +174,6 @@ class GenieXEngine(
                     maxTokens = maxTokens,
                     stopWords = null,
                     stopCount = 0,
-                    nPast = 0,
                     imagePaths = null,
                     imageCount = 0,
                     audioPaths = null,
@@ -185,7 +219,15 @@ class GenieXEngine(
 
     companion object {
         private const val TAG = "PhoneBench"
-        const val SDK_VERSION = "0.3.5"
+        const val SDK_VERSION = "0.8.0"
+
+        /**
+         * The AI Hub release qairt models are pulled from. 0.64.0 bundles are built with
+         * QAIRT 2.45, the runtime SDK 0.8.0 ships; it is also the last release with SM8850
+         * bundles for Qwen3-VL-8B and Gemma-4-E4B. Changing it changes which bundle a
+         * model downloads, so already-downloaded models keep the old one.
+         */
+        const val AIHUB_RELEASE = "v0.64.0"
 
         /** Room for an image, its answer, and a follow-up turn, over the image cost. */
         private const val VLM_CTX_HEADROOM = 2048

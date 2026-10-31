@@ -252,6 +252,13 @@ fieldset label + label {
   margin-bottom: 8px;
 }
 
+/* A prompt and its follow-up turns, set apart from the next prompt. */
+.prompt-group {
+  margin-bottom: 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+}
+
 .submit-row {
   display: flex;
   align-items: center;
