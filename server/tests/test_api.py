@@ -306,3 +306,18 @@ def test_single_turn_job_has_no_turns_csv(env):
     job = env.submit().json()
     env.worker().run_until_idle()
     assert env.client.get(f"/api/v1/jobs/{job['job_id']}/outputs/turns.csv").status_code == 404
+
+
+def test_geniex_timing_metrics_are_kept(env):
+    job = env.submit()
+    worker = env.worker()
+    unit = worker.take_unit()
+    for run in unit["runs"]:
+        body = worker.result(unit, run, True)
+        body["metrics"] = {**body["metrics"], "media_ms": 412.5, "prompt_time_ms": 230.0, "decode_time_ms": 1800.0}
+        assert env.client.post(f"/api/v1/device/runs/{run['run_id']}", headers=worker.headers, json=body).status_code == 200
+    worker.run_until_idle()
+    job_id = job.json()["job_id"]
+    runs = list(csv.DictReader(io.StringIO(env.client.get(f"/api/v1/jobs/{job_id}/outputs/runs.csv").content.decode("utf-8-sig"))))
+    reported = [row for row in runs if row["run_id"] in {run["run_id"] for run in unit["runs"]}]
+    assert reported and all((row["media_ms"], row["prompt_time_ms"], row["decode_time_ms"]) == ("412.5", "230.0", "1800.0") for row in reported)

@@ -18,6 +18,12 @@ data class RunOutput(
     val prefillTokS: Double,
     val decodeTokS: Double,
     val stopReason: String,
+    /** Vision encoder time, when the framework reports it (GenieX `mediaMs`). */
+    val mediaMs: Double = Double.NaN,
+    /** Prefill time excluding the vision encoder (GenieX `promptTimeMs`). */
+    val promptTimeMs: Double = Double.NaN,
+    /** Decode time (GenieX `decodeTimeMs`). */
+    val decodeTimeMs: Double = Double.NaN,
 )
 
 /**

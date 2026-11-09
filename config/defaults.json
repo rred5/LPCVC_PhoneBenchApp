@@ -27,7 +27,10 @@
       "reported_total_tokens",
       "ttft_ms",
       "prefill_tok_s",
-      "decode_tok_s"
+      "decode_tok_s",
+      "media_ms",
+      "prompt_time_ms",
+      "decode_time_ms"
     ]
   }
 }
