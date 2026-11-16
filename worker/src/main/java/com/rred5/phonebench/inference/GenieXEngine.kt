@@ -196,6 +196,9 @@ class GenieXEngine(
                             prefillTokS = profile.prefillSpeed,
                             decodeTokS = profile.decodingSpeed,
                             stopReason = profile.stopReason,
+                            mediaMs = profile.mediaMs,
+                            promptTimeMs = profile.promptTimeMs,
+                            decodeTimeMs = profile.decodeTimeMs,
                         )
                 }
                 is LlmStreamResult.Error -> throw result.throwable

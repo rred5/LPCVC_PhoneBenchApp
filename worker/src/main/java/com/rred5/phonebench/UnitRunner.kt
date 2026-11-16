@@ -301,6 +301,9 @@ class UnitRunner(
             .put("prefill_tok_s", finite(output.prefillTokS))
             .put("decode_tok_s", finite(output.decodeTokS))
             .put("stop_reason", output.stopReason)
+            .put("media_ms", finite(output.mediaMs))
+            .put("prompt_time_ms", finite(output.promptTimeMs))
+            .put("decode_time_ms", finite(output.decodeTimeMs))
 
     private fun turnReports(outputs: List<RunOutput>) =
         org.json.JSONArray(outputs.map { JSONObject().put("response", it.response).put("error", JSONObject.NULL).put("metrics", metrics(it)) })

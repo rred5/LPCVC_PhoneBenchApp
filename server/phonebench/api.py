@@ -93,6 +93,10 @@ class Metrics(_Body):
     prefill_tok_s: float | None = None
     decode_tok_s: float | None = None
     stop_reason: str | None = None
+    # GenieX ProfilingData: vision encoder, prefill without the encoder, and decode time.
+    media_ms: float | None = None
+    prompt_time_ms: float | None = None
+    decode_time_ms: float | None = None
 
 
 class TurnReport(_Body):
