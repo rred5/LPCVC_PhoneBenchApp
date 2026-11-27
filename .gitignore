@@ -22,3 +22,6 @@ web/dist/
 # Downloaded OAuth credentials (Google client secrets); never commit
 GoogleAuth_*.json
 client_secret*.json
+
+# Claude Code worktrees and local settings
+.claude/
