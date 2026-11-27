@@ -13,7 +13,8 @@ import math
 
 from .config import Config
 
-METRICS = ("prompt_tokens", "generated_tokens", "reported_total_tokens", "ttft_ms", "prefill_tok_s", "decode_tok_s")
+METRICS = ("prompt_tokens", "generated_tokens", "reported_total_tokens", "ttft_ms", "prefill_tok_s", "decode_tok_s",
+           "media_ms", "prompt_time_ms", "decode_time_ms")
 BACKENDS = ("CPU", "GPU", "NPU")
 MODES = ("warm", "cold")
 FRAMEWORKS = ("geniex",)
